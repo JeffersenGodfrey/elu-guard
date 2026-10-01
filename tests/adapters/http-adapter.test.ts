@@ -85,6 +85,24 @@ describe('eluGuardHttp adapter (integration)', () => {
     await guard.stop();
   });
 
+  test('releases the permit and returns 500 when the handler throws', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 1, maxConcurrency: 1 } });
+    const server = createServer(
+      eluGuardHttp(guard, async () => {
+        throw new Error('handler failed');
+      }),
+    );
+    const port = await listen(server);
+
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    expect(res.status).toBe(500);
+    expect(guard.stats().inFlight).toBe(0);
+    expect(guard.stats().probes).toBe(0);
+
+    await close(server);
+    await guard.stop();
+  });
+
   test('client disconnect frees the slot without counting a breaker failure', async () => {
     const guard = new EluGuard({
       limiter: { initialConcurrency: 2, maxConcurrency: 2 },

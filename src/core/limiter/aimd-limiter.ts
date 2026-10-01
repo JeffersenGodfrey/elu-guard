@@ -135,7 +135,11 @@ export class AimdLimiter {
     const previousLimit = this.limit;
     const low = Math.max(0, this.opts.targetElu - this.opts.hysteresis);
     if (elu >= this.opts.targetElu) {
-      this.limit = Math.max(this.opts.minConcurrency, Math.floor(this.limit * this.opts.decreaseFactor));
+      this.limit = Math.max(
+        this.inFlight,
+        this.opts.minConcurrency,
+        Math.floor(this.limit * this.opts.decreaseFactor),
+      );
     } else if (elu <= low) {
       const step = this.opts.increaseStep > 0 ? this.opts.increaseStep : Math.max(1, Math.floor(Math.sqrt(this.limit)));
       this.limit = Math.min(this.opts.maxConcurrency, this.limit + step);
@@ -178,7 +182,7 @@ export class AimdLimiter {
     const previousLimit = this.limit;
     this.limit = Math.min(
       this.opts.maxConcurrency,
-      Math.max(this.opts.minConcurrency, Math.floor(this.limit * factor)),
+      Math.max(this.inFlight, this.opts.minConcurrency, Math.floor(this.limit * factor)),
     );
     if (this.limit !== previousLimit) {
       for (const listener of this.limitListeners) listener(this.limit, this.sampler.current);

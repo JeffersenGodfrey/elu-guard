@@ -44,6 +44,17 @@ export function eluGuardHttp(guard: EluGuard, handler: HttpHandler): HttpHandler
     // 'close' also fires after a normal finish; `settled` keeps that harmless.
     res.on('close', () => settle('abort'));
 
-    await handler(req, res);
+    try {
+      await handler(req, res);
+    } catch {
+      settle('failure');
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.end('Internal Server Error');
+      } else if (!res.writableEnded) {
+        res.destroy();
+      }
+      return;
+    }
   };
 }

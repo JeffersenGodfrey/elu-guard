@@ -16,6 +16,15 @@ describe('AimdLimiter — control loop', () => {
     limiter.stop();
   });
 
+  test('does not report a limit below active permits while shrinking', async () => {
+    const limiter = new AimdLimiter({ initialConcurrency: 10, maxConcurrency: 10, decreaseFactor: 0.5 });
+    for (let i = 0; i < 10; i++) await limiter.acquire();
+    limiter.adjust(0.9);
+    expect(limiter.currentInFlight).toBe(10);
+    expect(limiter.currentLimit).toBe(10);
+    limiter.stop();
+  });
+
   test('holds steady inside the hysteresis band', () => {
     const limiter = new AimdLimiter({ initialConcurrency: 50, maxConcurrency: 1000, targetElu: 0.8, hysteresis: 0.2 });
     limiter.adjust(0.7); // between 0.6 and 0.8

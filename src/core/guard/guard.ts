@@ -114,7 +114,6 @@ export class EluGuard extends EventEmitter {
     options: ExecuteOptions<T> = {},
   ): Promise<T> {
     if (this.closed) throw new ShuttingDownError('Guard is closed');
-    const startedAt = Date.now();
     const admission: Admission = this.breaker.tryAcquire();
     if (admission.kind === 'reject') {
       const openErr = new CircuitOpenError();
@@ -169,6 +168,7 @@ export class EluGuard extends EventEmitter {
     };
 
     let permit = false;
+    let admittedAt = 0;
     try {
       try {
         // controller.signal, not callerSignal: a deadline that expires while
@@ -206,6 +206,7 @@ export class EluGuard extends EventEmitter {
         throw err;
       }
       permit = true;
+      admittedAt = Date.now();
 
       try {
         if (controller.signal.aborted) {
@@ -227,7 +228,7 @@ export class EluGuard extends EventEmitter {
         // one release per acquisition" hold for every outcome.
         this.limiter.release();
         if (releaseProbe) releaseProbe();
-        this.limiter.recordLatency(Date.now() - startedAt);
+        this.limiter.recordLatency(Date.now() - admittedAt);
         this.breaker.recordSuccess();
         permit = false;
         return result;
@@ -242,7 +243,7 @@ export class EluGuard extends EventEmitter {
           clearAll();
           this.limiter.release();
           if (releaseProbe) releaseProbe();
-          this.limiter.recordLatency(Date.now() - startedAt);
+          this.limiter.recordLatency(Date.now() - admittedAt);
           if (failure) {
             this.limiter.recordFailure();
             this.pauseAfterRetry(timeoutErr);
@@ -272,7 +273,7 @@ export class EluGuard extends EventEmitter {
         clearAll();
         this.limiter.release();
         if (releaseProbe) releaseProbe();
-        this.limiter.recordLatency(Date.now() - startedAt);
+        this.limiter.recordLatency(Date.now() - admittedAt);
         if (failure) {
           this.limiter.recordFailure();
           this.pauseAfterRetry(err);

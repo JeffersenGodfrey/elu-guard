@@ -123,6 +123,18 @@ describe('EluGuard', () => {
     await guard.stop();
   });
 
+  test('latency feedback excludes time spent waiting for a permit', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 1, maxConcurrency: 1, queueTimeoutMs: 1000, latencyThresholdMs: 20 },
+    });
+    const first = guard.execute(() => new Promise((resolve) => setTimeout(resolve, 40)));
+    const second = guard.execute(async () => 'fast');
+    await first;
+    await expect(second).resolves.toBe('fast');
+    expect(guard.stats().limit).toBe(1);
+    await guard.stop();
+  });
+
   test('Retry-After feedback pauses new admissions without opening the breaker', async () => {
     const guard = new EluGuard({
       limiter: { initialConcurrency: 2, maxConcurrency: 2, maxQueueLength: 0 },

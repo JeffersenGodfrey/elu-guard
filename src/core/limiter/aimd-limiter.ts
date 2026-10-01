@@ -75,6 +75,13 @@ export class LimiterAbortedError extends Error {
 export type LimitChangeListener = (limit: number, elu: number) => void;
 type ResolvedOptions = Required<AimdLimiterOptions>;
 
+function optionNumber(name: string, value: number, valid: (value: number) => boolean): number {
+  if (!Number.isFinite(value) || !valid(value)) {
+    throw new RangeError(`Invalid ${name}: ${value}`);
+  }
+  return value;
+}
+
 /**
  * Self-tuning concurrency limiter.
  *
@@ -102,22 +109,30 @@ export class AimdLimiter {
   private readonly limitListeners = new Set<LimitChangeListener>();
 
   constructor(options: AimdLimiterOptions = {}, samplerOptions: EluSamplerOptions = {}) {
-    const maxConcurrency = options.maxConcurrency ?? 500;
-    const minConcurrency = Math.min(options.minConcurrency ?? 5, maxConcurrency);
+    const maxConcurrency = optionNumber('maxConcurrency', options.maxConcurrency ?? 500, (value) => Number.isInteger(value) && value > 0);
+    const minConcurrency = Math.min(
+      optionNumber('minConcurrency', options.minConcurrency ?? 5, (value) => Number.isInteger(value) && value >= 0),
+      maxConcurrency,
+    );
+    const initialConcurrency = optionNumber(
+      'initialConcurrency',
+      options.initialConcurrency ?? minConcurrency,
+      (value) => Number.isInteger(value) && value >= 0,
+    );
     this.opts = {
       minConcurrency,
       maxConcurrency,
-      initialConcurrency: options.initialConcurrency ?? minConcurrency,
-      targetElu: options.targetElu ?? 0.8,
-      hysteresis: options.hysteresis ?? 0.2,
-      decreaseFactor: options.decreaseFactor ?? 0.8,
-      failureDecreaseFactor: options.failureDecreaseFactor ?? 0.8,
-      latencyThresholdMs: options.latencyThresholdMs ?? 0,
-      latencyDecreaseFactor: options.latencyDecreaseFactor ?? options.failureDecreaseFactor ?? 0.8,
-      increaseStep: options.increaseStep ?? 0,
-      sampleIntervalMs: options.sampleIntervalMs ?? 1000,
-      queueTimeoutMs: options.queueTimeoutMs ?? 5000,
-      maxQueueLength: options.maxQueueLength ?? 1000,
+      initialConcurrency,
+      targetElu: optionNumber('targetElu', options.targetElu ?? 0.8, (value) => value >= 0 && value <= 1),
+      hysteresis: optionNumber('hysteresis', options.hysteresis ?? 0.2, (value) => value >= 0 && value <= 1),
+      decreaseFactor: optionNumber('decreaseFactor', options.decreaseFactor ?? 0.8, (value) => value > 0 && value <= 1),
+      failureDecreaseFactor: optionNumber('failureDecreaseFactor', options.failureDecreaseFactor ?? 0.8, (value) => value > 0 && value <= 1),
+      latencyThresholdMs: optionNumber('latencyThresholdMs', options.latencyThresholdMs ?? 0, (value) => value >= 0),
+      latencyDecreaseFactor: optionNumber('latencyDecreaseFactor', options.latencyDecreaseFactor ?? options.failureDecreaseFactor ?? 0.8, (value) => value > 0 && value <= 1),
+      increaseStep: optionNumber('increaseStep', options.increaseStep ?? 0, (value) => Number.isInteger(value) && value >= 0),
+      sampleIntervalMs: optionNumber('sampleIntervalMs', options.sampleIntervalMs ?? 1000, (value) => value > 0),
+      queueTimeoutMs: optionNumber('queueTimeoutMs', options.queueTimeoutMs ?? 5000, (value) => value >= 0),
+      maxQueueLength: optionNumber('maxQueueLength', options.maxQueueLength ?? 1000, (value) => Number.isInteger(value) && value >= 0),
     };
     this.limit = Math.min(this.opts.initialConcurrency, this.opts.maxConcurrency);
     this.sampler = new EluSampler({ intervalMs: this.opts.sampleIntervalMs, ...samplerOptions });

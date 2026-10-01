@@ -1,6 +1,10 @@
 import { CircuitBreaker } from '../../src/core/breaker/circuit-breaker';
 
 describe('CircuitBreaker', () => {
+  test('rejects invalid numeric configuration', () => {
+    expect(() => new CircuitBreaker({ failureThreshold: -1 })).toThrow(RangeError);
+    expect(() => new CircuitBreaker({ halfOpenMaxCalls: 0 })).toThrow(RangeError);
+  });
   test('starts closed', () => {
     const cb = new CircuitBreaker();
     expect(cb.currentState).toBe('closed');

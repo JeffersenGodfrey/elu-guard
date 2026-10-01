@@ -1,6 +1,10 @@
 import { AimdLimiter, LimitRejectedError, LimiterAbortedError, ShuttingDownError } from '../../src/core/limiter/aimd-limiter';
 
 describe('AimdLimiter — control loop', () => {
+  test('rejects invalid numeric configuration', () => {
+    expect(() => new AimdLimiter({ maxConcurrency: Number.NaN })).toThrow(RangeError);
+    expect(() => new AimdLimiter({ decreaseFactor: 1.5 })).toThrow(RangeError);
+  });
   test('increases the limit additively (sqrt step) when ELU is below the hysteresis band', () => {
     const limiter = new AimdLimiter({ initialConcurrency: 16, maxConcurrency: 1000, targetElu: 0.8, hysteresis: 0.2 });
     limiter.adjust(0.3); // below 0.6 (0.8 - 0.2)

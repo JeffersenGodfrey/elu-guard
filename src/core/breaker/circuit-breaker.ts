@@ -22,6 +22,13 @@ interface Outcome {
 
 type ResolvedOptions = Required<CircuitBreakerOptions>;
 
+function optionNumber(name: string, value: number, valid: (value: number) => boolean): number {
+  if (!Number.isFinite(value) || !valid(value)) {
+    throw new RangeError(`Invalid ${name}: ${value}`);
+  }
+  return value;
+}
+
 export type Admission =
   | { kind: 'allow' }
   | { kind: 'probe'; release: () => void }
@@ -37,11 +44,11 @@ export class CircuitBreaker {
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.opts = {
-      failureThreshold: options.failureThreshold ?? 0.5,
-      minimumRequests: options.minimumRequests ?? 10,
-      windowMs: options.windowMs ?? 10000,
-      resetTimeoutMs: options.resetTimeoutMs ?? 5000,
-      halfOpenMaxCalls: options.halfOpenMaxCalls ?? 3,
+      failureThreshold: optionNumber('failureThreshold', options.failureThreshold ?? 0.5, (value) => value >= 0 && value <= 1),
+      minimumRequests: optionNumber('minimumRequests', options.minimumRequests ?? 10, (value) => Number.isInteger(value) && value > 0),
+      windowMs: optionNumber('windowMs', options.windowMs ?? 10000, (value) => value >= 0),
+      resetTimeoutMs: optionNumber('resetTimeoutMs', options.resetTimeoutMs ?? 5000, (value) => value >= 0),
+      halfOpenMaxCalls: optionNumber('halfOpenMaxCalls', options.halfOpenMaxCalls ?? 3, (value) => Number.isInteger(value) && value > 0),
     };
   }
 

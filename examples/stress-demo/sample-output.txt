@@ -1,0 +1,41 @@
+ELU Guard — Adaptive Concurrency Demo
+
+Baseline
+──────────────────────────────
+ELU  0.00   Limit   20   Active    0   Queue 0
+
+Increasing event-loop load...
+
+  [adjust] elu=1.00 -> limit=16
+  [adjust] elu=0.00 -> limit=20
+ELU  0.00   Limit   20   Active    0   Queue 0
+
+Event loop recovering...
+
+  [adjust] elu=0.01 -> limit=24
+  [adjust] elu=0.00 -> limit=28
+  [adjust] elu=0.00 -> limit=30
+ELU  0.00   Limit   30   Active    0   Queue 0
+
+──────────────────────────────
+Circuit breaker demo (fresh guard, clean window)
+──────────────────────────────
+
+Downstream failures:
+  failure 1
+  failure 2
+  [circuit] -> OPEN
+  failure 3
+  failure 4
+Circuit: OPEN
+
+Requests rejected without calling downstream:
+  rejected fast: CircuitOpenError
+
+Waiting for recovery...
+  [circuit] -> HALF-OPEN
+Circuit: HALF-OPEN
+
+Probe: SUCCESS
+  [circuit] -> CLOSED
+Circuit: CLOSED

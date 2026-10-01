@@ -1,0 +1,106 @@
+{
+  "name": "elu-guard",
+  "version": "1.0.0",
+  "packageManager": "npm@10.9.2",
+  "description": "Framework-agnostic adaptive concurrency limiting (Event Loop Utilization driven, AIMD-controlled) with a built-in circuit breaker for Node.js.",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.mjs",
+  "types": "./dist/cjs/index.d.ts",
+  "type": "commonjs",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/esm/index.d.mts",
+        "require": "./dist/cjs/index.d.ts"
+      },
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "author": "Jeffersen Godfrey A M",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JeffersenGodfrey/elu-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JeffersenGodfrey/elu-guard/issues"
+  },
+  "homepage": "https://github.com/JeffersenGodfrey/elu-guard#readme",
+  "dependencies": {
+    "fastify-plugin": "^4.5.1"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "test:coverage": "jest --coverage && node scripts/check-coverage.mjs",
+    "test:properties": "jest tests/properties",
+    "lint": "eslint src tests benchmarks examples",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "demo": "ts-node examples/stress-demo/index.ts",
+    "bench": "ts-node benchmarks/mixed.ts",
+    "bench:cpu": "ts-node benchmarks/cpu-heavy.ts",
+    "bench:overload": "ts-node benchmarks/overload.ts",
+    "bench:sustained-overload": "ts-node benchmarks/sustained-overload.ts",
+    "bench:fragile-downstream": "ts-node benchmarks/fragile-downstream.ts",
+    "bench:sync": "ts-node benchmarks/compare.ts",
+    "soak": "ts-node benchmarks/soak.ts",
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify:all": "npm run typecheck && npm run lint && npm test && npm run test:coverage && npm run build && npm run verify:package",
+    "prepublishOnly": "npm run verify:all"
+  },
+  "keywords": [
+    "circuit-breaker",
+    "rate-limiter",
+    "concurrency",
+    "backpressure",
+    "event-loop-utilization",
+    "resilience",
+    "aimd",
+    "node"
+  ],
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
+    "eslint": "^8.57.0",
+    "express": "^4.19.2",
+    "fast-check": "^4.10.2",
+    "fastify": "^5.12.5",
+    "jest": "^29.7.0",
+    "publint": "^0.3.24",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

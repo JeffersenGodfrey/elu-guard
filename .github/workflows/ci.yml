@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.x, 22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npm run audit:prod
+
+  coverage:
+    name: coverage floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - run: npm ci
+      # Fails the build if src/core drops below the thresholds in jest.config.js.
+      - run: npm run test:coverage
+
+  package:
+    name: package (publint, attw, fresh install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - run: npx publint
+      - run: npx @arethetypeswrong/cli --pack .
+      # Packs the real tarball, installs it into a throwaway project and consumes
+      # it from CJS, ESM and TypeScript. Catches what publint/attw cannot.
+      - run: npm run verify:package
+
+  # The published peer range is fastify >=4, but devDependencies track v5.
+  # This job keeps the v4 claim honest.
+  compat-fastify-4:
+    name: fastify v4 compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - run: npm ci
+      - run: npm install --no-save fastify@^4.28.1
+      - run: npx jest tests/adapters/fastify-adapter.test.ts --runInBand
+
+  compat-express-4:
+    name: express v4 compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - run: npm ci
+      - run: npx jest tests/adapters/express-adapter.test.ts --runInBand
+

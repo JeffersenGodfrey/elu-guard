@@ -1,0 +1,58 @@
+name: Benchmark
+
+# Benchmarks are environment sensitive, so they are deliberately not part of CI.
+# Run them on demand and compare like-for-like on the same machine.
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: 'Repetitions per configuration (per-metric medians are reported)'
+        required: false
+        default: '3'
+      phase_ms:
+        description: 'Milliseconds per workload phase (steady/spikes/heavy/recover)'
+        required: false
+        default: '5000'
+      soak_minutes:
+        description: 'Minutes for the leak soak run'
+        required: false
+        default: '2'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Mixed workload benchmark (fixed-low vs fixed-high vs adaptive)
+        run: BENCH_REPS=${{ inputs.reps }} BENCH_PHASE_MS=${{ inputs.phase_ms }} npm run bench | tee bench.txt
+      - name: Soak (permit / probe leak check)
+        run: SOAK_MINUTES=${{ inputs.soak_minutes }} npm run soak | tee soak.txt
+      - name: Synchronous-workload benchmark (kept for history)
+        run: npm run bench:sync | tee bench-sync.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            bench.txt
+            soak.txt
+            bench-sync.txt
+      - run: |
+          {
+            echo '## Mixed workload benchmark'
+            echo '```'
+            cat bench.txt
+            echo '```'
+            echo '## Soak'
+            echo '```'
+            cat soak.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

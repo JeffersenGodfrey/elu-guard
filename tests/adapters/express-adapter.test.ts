@@ -2,7 +2,7 @@ import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import { EluGuard } from '../../src/core/guard/guard';
-import { eluGuardExpress } from '../../src/adapters/express/express-adapter';
+import { eluGuardExpress } from '../../src/express';
 
 function waitForListening(server: Server): Promise<number> {
   return new Promise((resolve) => {

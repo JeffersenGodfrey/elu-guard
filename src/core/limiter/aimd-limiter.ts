@@ -19,10 +19,21 @@ export interface AimdLimiterOptions {
   decreaseFactor?: number;
   /** Multiplicative decrease factor applied after a classified downstream failure. Default 0.8. */
   failureDecreaseFactor?: number;
-  /** Reduce the limit when an admitted operation exceeds this latency, in ms. */
+  /** Reduce the limit when the p95 of recent admitted calls exceeds this latency, in ms. */
   latencyThresholdMs?: number;
   /** Multiplicative decrease factor applied when latency exceeds the threshold. Default 0.8. */
   latencyDecreaseFactor?: number;
+  /**
+   * Rolling sample window used for latency feedback. Defaults to 100 samples;
+   * the guard feeds one duration per admitted call, so this is roughly the last
+   * 100 calls. A larger window is more stable, a smaller one reacts faster.
+   */
+  latencyWindowSize?: number;
+  /**
+   * Minimum samples before latency feedback can act. Defaults to 20, so a few
+   * early slow calls cannot immediately shrink the limit.
+   */
+  latencyMinSamples?: number;
   /** Fixed additive increase step. 0 (default) means sqrt(currentLimit), which
    *  recovers faster at low limits and slower as the limit grows. */
   increaseStep?: number;
@@ -72,7 +83,16 @@ export class LimiterAbortedError extends Error {
   }
 }
 
-export type LimitChangeListener = (limit: number, elu: number) => void;
+export type LimitChangeReason = 'low-elu' | 'high-elu' | 'failure' | 'latency' | 'retry-after';
+
+export interface LimitChange {
+  previousLimit: number;
+  limit: number;
+  elu: number;
+  reason: LimitChangeReason;
+}
+
+export type LimitChangeListener = (change: LimitChange) => void;
 type ResolvedOptions = Required<AimdLimiterOptions>;
 
 function optionNumber(name: string, value: number, valid: (value: number) => boolean): number {
@@ -107,6 +127,7 @@ export class AimdLimiter {
   private pausedUntil = 0;
   private pauseTimer: NodeJS.Timeout | null = null;
   private readonly limitListeners = new Set<LimitChangeListener>();
+  private readonly latencySamples: number[] = [];
 
   constructor(options: AimdLimiterOptions = {}, samplerOptions: EluSamplerOptions = {}) {
     const maxConcurrency = optionNumber('maxConcurrency', options.maxConcurrency ?? 500, (value) => Number.isInteger(value) && value > 0);
@@ -129,6 +150,8 @@ export class AimdLimiter {
       failureDecreaseFactor: optionNumber('failureDecreaseFactor', options.failureDecreaseFactor ?? 0.8, (value) => value > 0 && value <= 1),
       latencyThresholdMs: optionNumber('latencyThresholdMs', options.latencyThresholdMs ?? 0, (value) => value >= 0),
       latencyDecreaseFactor: optionNumber('latencyDecreaseFactor', options.latencyDecreaseFactor ?? options.failureDecreaseFactor ?? 0.8, (value) => value > 0 && value <= 1),
+      latencyWindowSize: optionNumber('latencyWindowSize', options.latencyWindowSize ?? 100, (value) => Number.isInteger(value) && value > 0),
+      latencyMinSamples: optionNumber('latencyMinSamples', options.latencyMinSamples ?? 20, (value) => Number.isInteger(value) && value > 0),
       increaseStep: optionNumber('increaseStep', options.increaseStep ?? 0, (value) => Number.isInteger(value) && value >= 0),
       sampleIntervalMs: optionNumber('sampleIntervalMs', options.sampleIntervalMs ?? 1000, (value) => value > 0),
       queueTimeoutMs: optionNumber('queueTimeoutMs', options.queueTimeoutMs ?? 5000, (value) => value >= 0),
@@ -149,18 +172,21 @@ export class AimdLimiter {
   adjust(elu: number): void {
     const previousLimit = this.limit;
     const low = Math.max(0, this.opts.targetElu - this.opts.hysteresis);
+    let reason: LimitChangeReason | null = null;
     if (elu >= this.opts.targetElu) {
       this.limit = Math.max(
         this.inFlight,
         this.opts.minConcurrency,
         Math.floor(this.limit * this.opts.decreaseFactor),
       );
+      reason = 'high-elu';
     } else if (elu <= low) {
       const step = this.opts.increaseStep > 0 ? this.opts.increaseStep : Math.max(1, Math.floor(Math.sqrt(this.limit)));
       this.limit = Math.min(this.opts.maxConcurrency, this.limit + step);
+      reason = 'low-elu';
     }
     if (this.limit !== previousLimit) {
-      for (const listener of this.limitListeners) listener(this.limit, elu);
+      this.emitLimitChange(previousLimit, this.limit, elu, reason ?? 'low-elu');
     }
     this.drainQueue();
   }
@@ -171,20 +197,19 @@ export class AimdLimiter {
    * pool exhaustion, rate limits, or dependency overload responses.
    */
   recordFailure(): void {
-    this.backoff(this.opts.failureDecreaseFactor);
+    this.backoff(this.opts.failureDecreaseFactor, 'failure');
   }
 
-  /** Feeds observed execution latency into the controller when configured. */
-  recordLatency(durationMs: number): void {
-    if (this.opts.latencyThresholdMs > 0 && durationMs > this.opts.latencyThresholdMs) {
-      this.backoff(this.opts.latencyDecreaseFactor);
-    }
-  }
-
-  /** Temporarily stops admitting new work, typically after Retry-After. */
+  /**
+   * Temporarily stops admitting new work, typically after a downstream
+   * Retry-After. Emits a `limitChange` with reason `retry-after` (the limit
+   * itself is unchanged) so consumers can observe the pause, then resumes
+   * queueing when the window expires.
+   */
   pause(durationMs: number): void {
     if (!Number.isFinite(durationMs) || durationMs <= 0) return;
     this.pausedUntil = Math.max(this.pausedUntil, Date.now() + durationMs);
+    this.emitLimitChange(this.limit, this.limit, this.sampler.current, 'retry-after');
     if (this.pauseTimer) clearTimeout(this.pauseTimer);
     this.pauseTimer = setTimeout(() => {
       this.pauseTimer = null;
@@ -193,22 +218,45 @@ export class AimdLimiter {
     }, Math.max(1, this.pausedUntil - Date.now()));
   }
 
-  private backoff(factor: number): void {
+  private backoff(factor: number, reason: LimitChangeReason): void {
     const previousLimit = this.limit;
     this.limit = Math.min(
       this.opts.maxConcurrency,
       Math.max(this.inFlight, this.opts.minConcurrency, Math.floor(this.limit * factor)),
     );
     if (this.limit !== previousLimit) {
-      for (const listener of this.limitListeners) listener(this.limit, this.sampler.current);
+      this.emitLimitChange(previousLimit, this.limit, this.sampler.current, reason);
     }
     this.drainQueue();
+  }
+
+  private emitLimitChange(previousLimit: number, limit: number, elu: number, reason: LimitChangeReason): void {
+    for (const listener of this.limitListeners) listener({ previousLimit, limit, elu, reason });
+  }
+
+  /** Feeds observed execution latency into the controller when configured. */
+  recordLatency(durationMs: number): void {
+    if (!Number.isFinite(durationMs) || durationMs < 0) return;
+    this.latencySamples.push(durationMs);
+    if (this.latencySamples.length > this.opts.latencyWindowSize) this.latencySamples.shift();
+    if (this.opts.latencyThresholdMs <= 0) return;
+    if (this.latencySamples.length < this.opts.latencyMinSamples) return;
+    if (this.latencyP95 > this.opts.latencyThresholdMs) {
+      this.backoff(this.opts.latencyDecreaseFactor, 'latency');
+    }
   }
 
   /** Subscribe to limit changes. Returns an unsubscribe function. */
   onLimitChange(listener: LimitChangeListener): () => void {
     this.limitListeners.add(listener);
     return () => this.limitListeners.delete(listener);
+  }
+
+  /** p95 of the current latency window, or 0 when there are no samples. */
+  get latencyP95(): number {
+    if (this.latencySamples.length === 0) return 0;
+    const sorted = [...this.latencySamples].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
   }
 
   private drainQueue(): void {

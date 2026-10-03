@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { connect } from 'node:net';
 import { EluGuard } from '../../src/core/guard/guard';
-import { eluGuardFastify } from '../../src/adapters/fastify/fastify-adapter';
+import { eluGuardFastify } from '../../src/fastify';
 
 describe('eluGuardFastify adapter (integration)', () => {
   test('passes normal requests through', async () => {

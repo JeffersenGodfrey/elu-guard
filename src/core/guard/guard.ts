@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { AimdLimiter, AimdLimiterOptions, LimitRejectedError, LimiterAbortedError, ShuttingDownError } from '../limiter/aimd-limiter';
+import { AimdLimiter, AimdLimiterOptions, LimitChange, LimitRejectedError, LimiterAbortedError, ShuttingDownError } from '../limiter/aimd-limiter';
 import { CircuitBreaker, CircuitBreakerOptions, CircuitOpenError, CircuitState, Admission } from '../breaker/circuit-breaker';
 import { ConcurrencyLimitError, GuardAbortedError, GuardTimeoutError } from '../../errors';
 
@@ -32,6 +32,7 @@ export interface ExecuteOptions<T> {
   signal?: AbortSignal;
   fallback?: (error: unknown) => T | Promise<T>;
   countTimeoutAsFailure?: boolean;
+  isFailure?: (error: unknown) => boolean;
 }
 
 export interface ExecutionContext {
@@ -50,7 +51,19 @@ export interface EluGuardStats {
 
 export interface EluGuardEvents {
   stateChange: (state: CircuitState) => void;
-  limitChange: (limit: number, elu: number) => void;
+  limitChange: (change: LimitChange) => void;
+  rejected: (reason: RejectedReason) => void;
+}
+
+export type RejectedReason = 'circuit-open' | 'limiter' | 'timeout' | 'aborted';
+
+function isRateLimited(error: unknown): boolean {
+  if (error instanceof Error && (error.name === 'RateLimitedError' || error.name === 'TooManyRequestsError')) {
+    return true;
+  }
+  const status = (error as { status?: unknown; statusCode?: unknown } | null | undefined)?.status;
+  const statusCode = (error as { status?: unknown; statusCode?: unknown } | null | undefined)?.statusCode;
+  return status === 429 || statusCode === 429;
 }
 
 function isAbortLike(error: unknown): boolean {
@@ -89,19 +102,21 @@ export class EluGuard extends EventEmitter {
     this.defaultCountTimeoutAsFailure = options.countTimeoutAsFailure ?? true;
 
     this.breaker.onStateChange((state) => this.emit('stateChange', state));
-    this.limiter.onLimitChange((limit, elu) => this.emit('limitChange', limit, elu));
+    this.limiter.onLimitChange((change) => this.emit('limitChange', change));
   }
 
-  private classify(error: unknown, countTimeoutAsFailure: boolean): boolean {
-    if (this.isFailure) {
+  private classify(error: unknown, countTimeoutAsFailure: boolean, isFailure?: (error: unknown) => boolean): boolean {
+    const classifyAs = isFailure ?? this.isFailure;
+    if (classifyAs) {
       try {
-        return this.isFailure(error);
+        return classifyAs(error);
       } catch {
         return true;
       }
     }
     if (error instanceof GuardTimeoutError) return countTimeoutAsFailure;
     if (isAbortLike(error)) return false;
+    if (isRateLimited(error)) return false;
     if (error instanceof LimiterAbortedError) return false;
     if (error instanceof LimitRejectedError) return false;
     if (error instanceof ShuttingDownError) return false;
@@ -117,6 +132,7 @@ export class EluGuard extends EventEmitter {
     const admission: Admission = this.breaker.tryAcquire();
     if (admission.kind === 'reject') {
       const openErr = new CircuitOpenError();
+      this.emit('rejected', 'circuit-open');
       if (options.fallback) return options.fallback(openErr);
       throw openErr;
     }
@@ -187,6 +203,7 @@ export class EluGuard extends EventEmitter {
         }
         if (callerSignal?.aborted) {
           const abortedErr = new GuardAbortedError('Aborted while waiting for a slot', { cause: err });
+          this.emit('rejected', 'aborted');
           if (options.fallback) return options.fallback(abortedErr);
           throw abortedErr;
         }
@@ -194,11 +211,13 @@ export class EluGuard extends EventEmitter {
           // The internal controller was aborted for a reason other than the
           // caller (a deadline already returned above); never a failure.
           const abortedErr = new GuardAbortedError('Aborted while waiting for a slot', { cause: err });
+          this.emit('rejected', 'timeout');
           if (options.fallback) return options.fallback(abortedErr);
           throw abortedErr;
         }
         if (err instanceof LimitRejectedError) {
           const mapped = new ConcurrencyLimitError(err.message, { cause: err });
+          this.emit('rejected', 'limiter');
           if (options.fallback) return options.fallback(mapped);
           throw mapped;
         }
@@ -239,24 +258,25 @@ export class EluGuard extends EventEmitter {
             err instanceof GuardTimeoutError
               ? err
               : new GuardTimeoutError(`Operation timed out after ${timeoutMs}ms`, { cause: err });
-          const failure = this.classify(timeoutErr, countTimeout);
+          const failure = this.classify(timeoutErr, countTimeout, options.isFailure);
+          this.emit('rejected', 'timeout');
           clearAll();
           this.limiter.release();
           if (releaseProbe) releaseProbe();
           this.limiter.recordLatency(Date.now() - admittedAt);
           if (failure) {
             this.limiter.recordFailure();
-            this.pauseAfterRetry(timeoutErr);
             this.breaker.recordFailure();
-          }
-          else this.breaker.recordSuccess();
+          } else this.breaker.recordSuccess();
+          this.pauseAfterRetry(timeoutErr);
           permit = false;
           if (options.fallback) return options.fallback(timeoutErr);
           throw timeoutErr;
         }
         const abortedByCaller = callerSignal?.aborted === true;
-        if (abortedByCaller && !this.isFailure) {
+        if (abortedByCaller && !this.isFailure && !options.isFailure) {
           clearAll();
+          this.emit('rejected', 'aborted');
           // A cancelled call is not an outcome: record nothing, and hand a
           // half-open probe back so the next call can still probe.
           if (releaseProbe) releaseProbe();
@@ -266,20 +286,20 @@ export class EluGuard extends EventEmitter {
             err instanceof GuardAbortedError
               ? err
               : new GuardAbortedError('Operation aborted by the caller', { cause: err });
+          this.emit('rejected', 'aborted');
           if (options.fallback) return options.fallback(abortErr);
           throw abortErr;
         }
-        const failure = this.classify(err, countTimeout);
+        const failure = this.classify(err, countTimeout, options.isFailure);
         clearAll();
         this.limiter.release();
         if (releaseProbe) releaseProbe();
         this.limiter.recordLatency(Date.now() - admittedAt);
         if (failure) {
           this.limiter.recordFailure();
-          this.pauseAfterRetry(err);
           this.breaker.recordFailure();
-        }
-        else this.breaker.recordSuccess();
+        } else this.breaker.recordSuccess();
+        this.pauseAfterRetry(err);
         permit = false;
         if (failure && options.fallback) return options.fallback(err);
         throw err;

@@ -1,7 +1,7 @@
 import { EluGuard } from '../src';
 
 async function main() {
-  const minutes = Number(process.env.SOAK_MINUTES ?? 1);
+  const minutes = Number(process.env.SOAK_MINUTES ?? 5);
   const deadline = Date.now() + minutes * 60 * 1000;
   const guard = new EluGuard({
     limiter: { minConcurrency: 5, maxConcurrency: 60, sampleIntervalMs: 250, queueTimeoutMs: 2000 },

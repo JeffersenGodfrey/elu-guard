@@ -77,15 +77,8 @@ export class CircuitBreaker {
     if (this.state === next) return;
     this.state = next;
     if (next === 'open') this.openedAt = Date.now();
-    if (next === 'half-open') this.halfOpenInFlight = 0;
-    if (next === 'closed') {
-      this.outcomes = [];
-      this.halfOpenInFlight = 0;
-      while (this.pendingProbes.length > 0) {
-        const release = this.pendingProbes.pop();
-        if (release) release();
-      }
-    }
+    if (next === 'half-open' || next === 'closed') this.halfOpenInFlight = 0;
+    if (next === 'closed') this.outcomes = [];
     for (const listener of this.listeners) listener(next);
   }
 
@@ -108,24 +101,6 @@ export class CircuitBreaker {
       return { kind: 'reject' };
     }
     return { kind: 'reject' };
-  }
-
-  /** Backwards-compatible single-call check. Prefer tryAcquire() in new code. */
-  canPass(): boolean {
-    const admission = this.tryAcquire();
-    if (admission.kind === 'probe') {
-      this.pendingProbes.push(admission.release);
-      return true;
-    }
-    return admission.kind === 'allow';
-  }
-
-  private pendingProbes: Array<() => void> = [];
-
-  /** Release a probe reserved via canPass() when the limiter refuses the call. */
-  releasePendingProbe(): void {
-    const release = this.pendingProbes.pop();
-    if (release) release();
   }
 
   private pruneWindow(): void {

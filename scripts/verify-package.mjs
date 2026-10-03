@@ -76,10 +76,16 @@ function assertPackContents() {
 const CJS_CONSUMER = [
   "const assert = require('node:assert');",
   "const { EluGuard, CircuitOpenError, GuardTimeoutError, ConcurrencyLimitError } = require('elu-guard');",
+  "const { eluGuardHttp } = require('elu-guard/http');",
+  "const { eluGuardExpress } = require('elu-guard/express');",
+  "const { eluGuardFastify } = require('elu-guard/fastify');",
   '',
   'async function main() {',
   "  assert.strictEqual(typeof EluGuard, 'function');",
   "  assert.strictEqual(typeof ConcurrencyLimitError, 'function');",
+  "  assert.strictEqual(typeof eluGuardHttp, 'function');",
+  "  assert.strictEqual(typeof eluGuardExpress, 'function');",
+  "  assert.strictEqual(typeof eluGuardFastify, 'function');",
   '  const guard = new EluGuard({',
   '    limiter: { minConcurrency: 2, maxConcurrency: 2, maxQueueLength: 0, queueTimeoutMs: 50 },',
   '    breaker: { failureThreshold: 0.5, minimumRequests: 2 },',
@@ -116,6 +122,9 @@ const CJS_CONSUMER = [
 const ESM_CONSUMER = [
   "import assert from 'node:assert';",
   "import { EluGuard, CircuitOpenError, GuardTimeoutError } from 'elu-guard';",
+  "import { eluGuardHttp } from 'elu-guard/http';",
+  "import { eluGuardExpress } from 'elu-guard/express';",
+  "import { eluGuardFastify } from 'elu-guard/fastify';",
   '',
   'const guard = new EluGuard({',
   '  limiter: { minConcurrency: 2, maxConcurrency: 2, maxQueueLength: 0, queueTimeoutMs: 50 },',
@@ -166,7 +175,9 @@ const CORE_TS_CONSUMER = [
 const ADAPTER_TS_CONSUMER = [
   "import express from 'express';",
   "import Fastify from 'fastify';",
-  "import { EluGuard, eluGuardExpress, eluGuardFastify, eluGuardHttp } from 'elu-guard';",
+  "import { EluGuard, eluGuardExpress } from 'elu-guard/express';",
+  "import { eluGuardFastify } from 'elu-guard/fastify';",
+  "import { eluGuardHttp } from 'elu-guard/http';",
   '',
   'const guard = new EluGuard();',
   '',
@@ -239,7 +250,14 @@ function verifyConsumers(workspace) {
     [tscJs, ...baseTsArgs, '--module', 'node16', '--moduleResolution', 'node16', 'adapter-consumer.ts'],
     { cwd: workspace, shell: false },
   );
-  log('  adapter typescript consumer: ok (express + fastify types, skipLibCheck off)');
+  // The sub-paths must also resolve under legacy node10 resolution, which finds
+  // them through the "typesVersions" map in package.json.
+  run(
+    process.execPath,
+    [tscJs, ...baseTsArgs, '--module', 'commonjs', '--moduleResolution', 'node10', 'adapter-consumer.ts'],
+    { cwd: workspace, shell: false },
+  );
+  log('  adapter typescript consumer: ok (express + fastify types, node16 + node10, skipLibCheck off)');
 }
 
 function main() {

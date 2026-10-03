@@ -65,7 +65,7 @@ describe('EluGuard', () => {
   test('emits limitChange when the AIMD controller adjusts the limit', async () => {
     const guard = new EluGuard({ limiter: { initialConcurrency: 16, maxConcurrency: 100 } });
     const changes: number[] = [];
-    guard.on('limitChange', (limit) => changes.push(limit));
+    guard.on('limitChange', (change) => changes.push(change.limit));
 
     guard.limiter.adjust(0.1); // force a low-ELU sample manually
 
@@ -116,23 +116,83 @@ describe('EluGuard', () => {
 
   test('latency feedback reduces the limiter after a slow successful call', async () => {
     const guard = new EluGuard({
-      limiter: { initialConcurrency: 10, maxConcurrency: 10, latencyThresholdMs: 5, latencyDecreaseFactor: 0.5 },
+      limiter: { initialConcurrency: 10, maxConcurrency: 10, latencyThresholdMs: 5, latencyDecreaseFactor: 0.5, latencyMinSamples: 1 },
     });
     await guard.execute(() => new Promise((resolve) => setTimeout(resolve, 10)));
     expect(guard.stats().limit).toBe(5);
     await guard.stop();
   });
 
-  test('latency feedback excludes time spent waiting for a permit', async () => {
+  test('latency feedback uses a rolling p95 window, not a single slow call', async () => {
     const guard = new EluGuard({
-      limiter: { initialConcurrency: 1, maxConcurrency: 1, queueTimeoutMs: 1000, latencyThresholdMs: 20 },
+      limiter: { initialConcurrency: 1, maxConcurrency: 1, queueTimeoutMs: 1000, latencyThresholdMs: 20, latencyMinSamples: 1 },
     });
+    // Queue wait must not count as execution latency, so the queued fast call
+    // records ~0ms. The window still contains the first 40ms call, so p95
+    // stays above the threshold after both settle: 10 -> 5 -> 2 is not
+    // reachable here (max is 1), and the limit correctly stays pinned at 1.
     const first = guard.execute(() => new Promise((resolve) => setTimeout(resolve, 40)));
     const second = guard.execute(async () => 'fast');
     await first;
     await expect(second).resolves.toBe('fast');
     expect(guard.stats().limit).toBe(1);
     await guard.stop();
+  });
+
+  test('429 with Retry-After pauses admissions and does not open the breaker', async () => {
+    const err429 = Object.assign(new Error('too many requests'), { status: 429 });
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 2, maxConcurrency: 2, maxQueueLength: 0 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2 },
+      retryAfterMs: () => 50,
+    });
+    await expect(guard.execute(() => Promise.reject(err429))).rejects.toThrow('too many requests');
+    // The Retry-After pause rejects the next call at admission; the breaker
+    // stays closed because a 429 is capacity feedback, not a broken dependency.
+    await expect(guard.execute(async () => 'blocked')).rejects.toThrow();
+    expect(guard.stats().circuitState).toBe('closed');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await expect(guard.execute(async () => 'ok')).resolves.toBe('ok');
+    await guard.stop();
+  });
+
+  test('guard emits rejected with the reason on circuit-open, limiter, timeout and abort paths', async () => {
+    const reasons: string[] = [];
+
+    const openGuard = new EluGuard({
+      limiter: { initialConcurrency: 2, maxConcurrency: 2 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2 },
+    });
+    openGuard.on('rejected', (reason) => reasons.push(`open:${String(reason)}`));
+    const failing = () => Promise.reject(new Error('boom'));
+    await expect(openGuard.execute(failing)).rejects.toThrow('boom');
+    await expect(openGuard.execute(failing)).rejects.toThrow('boom');
+    await expect(openGuard.execute(async () => 'never')).rejects.toThrow();
+    expect(reasons).toContain('open:circuit-open');
+    await openGuard.stop();
+
+    const limitGuard = new EluGuard({ limiter: { initialConcurrency: 1, maxConcurrency: 1, maxQueueLength: 0 } });
+    limitGuard.on('rejected', (reason) => reasons.push(`limit:${String(reason)}`));
+    const first = limitGuard.execute(() => new Promise<string>((resolve) => setTimeout(() => resolve('a'), 80)));
+    await expect(limitGuard.execute(async () => 'b')).rejects.toThrow();
+    expect(reasons).toContain('limit:limiter');
+    await first;
+    await limitGuard.stop();
+
+    const timeoutGuard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    timeoutGuard.on('rejected', (reason) => reasons.push(`timeout:${String(reason)}`));
+    await expect(timeoutGuard.execute(() => new Promise(() => undefined), { timeoutMs: 20 })).rejects.toThrow();
+    expect(reasons).toContain('timeout:timeout');
+    await timeoutGuard.stop();
+
+    const abortGuard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    abortGuard.on('rejected', (reason) => reasons.push(`abort:${String(reason)}`));
+    const controller = new AbortController();
+    const pending = abortGuard.execute(() => new Promise(() => undefined), { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(reasons).toContain('abort:aborted');
+    await abortGuard.stop();
   });
 
   test('Retry-After feedback pauses new admissions without opening the breaker', async () => {

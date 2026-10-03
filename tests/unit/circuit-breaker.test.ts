@@ -5,10 +5,10 @@ describe('CircuitBreaker', () => {
     expect(() => new CircuitBreaker({ failureThreshold: -1 })).toThrow(RangeError);
     expect(() => new CircuitBreaker({ halfOpenMaxCalls: 0 })).toThrow(RangeError);
   });
-  test('starts closed', () => {
+  test('starts closed and admits calls', () => {
     const cb = new CircuitBreaker();
     expect(cb.currentState).toBe('closed');
-    expect(cb.canPass()).toBe(true);
+    expect(cb.tryAcquire().kind).toBe('allow');
   });
 
   test('stays closed below the failure threshold', () => {
@@ -27,7 +27,7 @@ describe('CircuitBreaker', () => {
     cb.recordFailure();
     cb.recordFailure();
     expect(cb.currentState).toBe('open');
-    expect(cb.canPass()).toBe(false);
+    expect(cb.tryAcquire().kind).toBe('reject');
   });
 
   test('does not evaluate the threshold before minimumRequests is reached', () => {

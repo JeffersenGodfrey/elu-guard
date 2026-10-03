@@ -1,5 +1,6 @@
 import express from 'express';
-import { EluGuard, eluGuardExpress } from '../../src';
+import { EluGuard } from '../../src';
+import { eluGuardExpress } from '../../src/express';
 
 const app = express();
 

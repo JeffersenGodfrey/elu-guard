@@ -1,7 +1,7 @@
 import { createServer, request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import { EluGuard } from '../../src/core/guard/guard';
-import { eluGuardHttp } from '../../src/adapters/http/http-adapter';
+import { eluGuardHttp } from '../../src/http';
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => {

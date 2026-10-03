@@ -84,29 +84,29 @@ execute(fn, opts)
    classify(result) -> breaker.recordSuccess() | breaker.recordFailure()
 ```
 
-   ## Architecture
+## Architecture
 
-   ```mermaid
-   flowchart LR
-      Caller[Caller or framework adapter] --> Guard[EluGuard.execute]
-      Guard --> Breaker[Circuit breaker]
-      Breaker -->|OPEN| Fallback[Fail fast or fallback]
-      Breaker -->|CLOSED or HALF_OPEN| Limiter[AIMD concurrency limiter]
-      Limiter -->|No slot| Queue[FIFO queue with timeout and abort]
-      Limiter -->|Admitted| Task[Downstream task]
-      Task --> Outcome{Outcome}
-      Outcome -->|Success| Recovery[Record success and release permit]
-      Outcome -->|Failure or timeout| Failure[Classify failure and release permit]
-      Failure --> Breaker
-      Failure --> Feedback[Failure, latency, or Retry-After feedback]
-      Feedback --> Limiter
-      ELU[Node event-loop utilization] --> Limiter
-      Recovery --> Breaker
-   ```
+```mermaid
+flowchart LR
+   Caller[Caller or framework adapter] --> Guard[EluGuard.execute]
+   Guard --> Breaker[Circuit breaker]
+   Breaker -->|OPEN| Fallback[Fail fast or fallback]
+   Breaker -->|CLOSED or HALF_OPEN| Limiter[AIMD concurrency limiter]
+   Limiter -->|No slot| Queue[FIFO queue with timeout and abort]
+   Limiter -->|Admitted| Task[Downstream task]
+   Task --> Outcome{Outcome}
+   Outcome -->|Success| Recovery[Record success and release permit]
+   Outcome -->|Failure or timeout| Failure[Classify failure and release permit]
+   Failure --> Breaker
+   Failure --> Feedback[Failure, latency, or Retry-After feedback]
+   Feedback --> Limiter
+   ELU[Node event-loop utilization] --> Limiter
+   Recovery --> Breaker
+```
 
-   Each guard owns its limiter and breaker. There is no global registry or shared
-   health state, so a failing dependency cannot reduce capacity for unrelated
-   dependencies.
+Each guard owns its limiter and breaker. There is no global registry or shared
+health state, so a failing dependency cannot reduce capacity for unrelated
+dependencies.
 
 The pieces:
 
@@ -121,6 +121,10 @@ src/adapters/
   http/     eluGuardHttp    zero framework dependency
   express/  eluGuardExpress
   fastify/  eluGuardFastify
+src/index.ts                root entry: core only, no framework types
+src/http.ts
+src/express.ts              sub-path entries: the opt-in adapter layers
+src/fastify.ts
 ```
 
 The core has no knowledge of Express, Fastify or HTTP beyond Node's own types;
@@ -138,9 +142,20 @@ reservations, queued waiters, timers - is what most of the test suite is about:
 npm install elu-guard
 ```
 
-Node.js 18 or newer (CI runs 20, 22 and 24). The core uses Node's own
-`perf_hooks`; the Fastify adapter also uses the small `fastify-plugin` runtime
-dependency.
+Node.js 18 or newer (CI runs 20, 22 and 24). The core uses only Node's own
+`perf_hooks`, so the main entry has **no runtime dependencies**. The framework
+adapters live behind sub-paths and list their frameworks as optional peer
+dependencies, so nothing is installed unless you import them:
+
+```ts
+import { createGuard } from 'elu-guard';                 // core: limiter + breaker + guard
+import { eluGuardHttp } from 'elu-guard/http';           // node:http, zero dependencies
+import { eluGuardExpress } from 'elu-guard/express';     // peer: express
+import { eluGuardFastify } from 'elu-guard/fastify';     // peers: fastify, fastify-plugin
+```
+
+Each sub-path also re-exports `EluGuard` (and the guard types) so an adapter file
+only needs one import if that is all it uses.
 
 ## Quick start
 
@@ -213,6 +228,21 @@ Do not stack both on the same route: the adapter would hold one permit while you
 handler asks for a second one. Pick one - adapters for inbound routes,
 `execute()` for internal call sites.
 
+```ts
+import express from 'express';
+import { EluGuard } from 'elu-guard';
+import { eluGuardExpress } from 'elu-guard/express';
+
+const app = express();
+app.use(eluGuardExpress(new EluGuard({ limiter: { maxConcurrency: 50 } })));
+app.get('/health', (_req, res) => res.json({ ok: true }));
+```
+
+When the adapter rejects, you get a plain `503` with a JSON body
+(`circuit open` vs `overloaded`), and the outcome the breaker sees is derived from
+the response: `< 500` is a success, `>= 500` is a failure, and a client
+disconnect records nothing at all.
+
 ## Configuration
 
 ### `EluGuard` options
@@ -237,8 +267,10 @@ handler asks for a second one. Pick one - adapters for inbound routes,
 | `hysteresis` | `0.2` | Gap below `targetElu` before the limit grows again (anti-oscillation) |
 | `decreaseFactor` | `0.8` | Multiplicative decrease applied above target |
 | `failureDecreaseFactor` | `0.8` | Multiplicative decrease after a failure counted by `isFailure` |
-| `latencyThresholdMs` | none | Reduce the limit when an admitted operation exceeds this duration |
+| `latencyThresholdMs` | none | Reduce the limit when the p95 of recent admitted calls exceeds this duration |
 | `latencyDecreaseFactor` | `0.8` | Multiplicative decrease applied after a latency breach |
+| `latencyWindowSize` | `100` | Rolling window of admitted-call durations kept for the latency p95 |
+| `latencyMinSamples` | `20` | Samples required before latency feedback is allowed to act |
 | `increaseStep` | `0` (sqrt of limit) | Fixed additive increase; `0` means `sqrt(currentLimit)` |
 | `sampleIntervalMs` | `1000` | How often ELU is resampled and the limit re-evaluated |
 | `queueTimeoutMs` | `5000` | How long a queued caller waits before `ConcurrencyLimitError` |
@@ -262,6 +294,7 @@ handler asks for a second one. Pick one - adapters for inbound routes,
 | `signal` | Caller `AbortSignal`; aborting rejects with `GuardAbortedError` |
 | `fallback(error)` | Value or function used instead of throwing on rejection paths |
 | `countTimeoutAsFailure` | Per-call override of the guard default |
+| `isFailure(error)` | Per-call override of the guard's `isFailure` |
 
 For HTTP clients, map the response metadata into the optional retry hook:
 
@@ -277,18 +310,73 @@ const guard = createGuard({
 The core does not assume a particular HTTP client or error shape. Your wrapper
 should throw an error for a 429 response, attach the parsed `Retry-After` delay,
 and return `true` from `isFailure` when that response should affect dependency
-health.
+health. A 429 that carried a usable `retryAfterMs` pauses admissions instead of
+touching the breaker, so a rate limit does not look like an outage.
+
+## Observability
+
+`EluGuard` is an `EventEmitter` with three events; `stats()` is the pull-based
+equivalent for polling scrapers.
+
+| Event | Payload | Fires when |
+|---|---|---|
+| `stateChange` | `CircuitState` | the breaker moves between `closed` / `open` / `half-open` |
+| `limitChange` | `LimitChange` | the adaptive limit moves, or admissions pause/resume |
+| `rejected` | `RejectedReason` | a call is refused for `circuit-open`, `limiter`, `timeout` or `aborted` |
+
+```ts
+const guard = createGuard();
+
+guard.on('stateChange', (state) => logger.warn({ state }, 'dependency circuit changed'));
+guard.on('limitChange', (change) => logger.info(change, 'concurrency limit changed'));
+guard.on('rejected', (reason) => metrics.increment('elu_guard_rejected', { reason }));
+
+// change: { previousLimit, limit, elu, reason }
+// reason: 'low-elu' | 'high-elu' | 'failure' | 'latency' | 'retry-after'
+```
+
+`stats()` returns `{ limit, inFlight, queueLength, elu, circuitState, probes }`,
+where `probes` is the number of half-open probe slots currently reserved. There is
+no timer keeping the process alive: sampling only runs while the guard is in use,
+and `stop()` (aliased as `close()`) releases everything.
 
 ## Benchmarks
 
-Run `npm run bench:fragile-downstream` to test a local dependency with a hard
-concurrent capacity. It returns HTTP 429 after that capacity is full and compares
-no admission control, a fixed limit at the dependency capacity, and the adaptive
-controller with ELU recovery plus classified-failure backoff.
+```bash
+npm run bench   # mixed async I/O + CPU-pressure phases, three configurations
+npm run soak    # long-running permit/probe leak check, in-memory workload
+npm run demo    # self-contained stress demo
+```
 
-This is a diagnostic benchmark, not a claim that adaptive concurrency always
-improves throughput. In the tested scenario, the fixed limit prevents overload,
-while the adaptive controller can still briefly overshoot before failure
-feedback lowers its limit. Results depend on the workload, dependency behavior,
-and configuration.
+`npm run bench` forks a separate downstream server process (so its latency is not
+distorted by the load generator) and a CPU-pressure helper, then walks the same
+callers through four phases - steady, pressure, heavy, recovery - against fixed
+limits of 10 and 100 and the adaptive controller. It reports per-phase medians
+over `BENCH_REPS` repetitions (default 3) for throughput, p50/p95/p99 latency,
+rejections, errors, average ELU, average limit and peak in-flight, so adaptive can
+be compared against both a floor and a ceiling rather than a single baseline.
+
+```bash
+BENCH_REPS=5 BENCH_PHASES_MS='10000,15000,15000,10000' npm run bench
+```
+
+This is diagnostic evidence from one machine, not a claim that adaptive
+concurrency always wins. A 3-repetition run on the development machine behind
+this README (220 callers, 30 ms downstream, default phases) produced:
+
+| phase | fixed-low(10) rps / p95 | fixed-high(100) rps / p95 | adaptive(5..100) rps / p95 |
+|---|---|---|---|
+| steady | 253 / 874 ms | 526 / 637 ms | 342 / 844 ms |
+| pressure | 260 / 959 ms | 473 / 772 ms | 423 / 609 ms |
+| heavy | 253 / 903 ms | 562 / 682 ms | 734 / 502 ms |
+| recover | 254 / 912 ms | 645 / 383 ms | 580 / 450 ms |
+
+The pattern: while the process still had slack, admitting more work (fixed-high)
+won on both throughput and latency. Once CPU pressure pinned the loop
+(`pressure`, `heavy`), the higher limit stopped buying parallelism and started
+buying queueing delay instead, and the adaptive controller - which had settled
+around 16-31 - beat fixed-high on throughput *and* p95. The fixed-low limit was
+the worst on both metrics in every phase, so a small static cap is not a
+substitute for measuring. Hardware, callers, downstream latency and option
+values all move these numbers, so run it against your own workload.
 

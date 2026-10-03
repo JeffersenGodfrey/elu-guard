@@ -29,8 +29,8 @@ async function main() {
     },
   });
 
-  limiterGuard.on('limitChange', (limit, elu) => {
-    console.log(`  [adjust] elu=${elu.toFixed(2)} -> limit=${limit}`);
+  limiterGuard.on('limitChange', (change) => {
+    console.log(`  [adjust] elu=${change.elu.toFixed(2)} ${change.previousLimit} -> ${change.limit} (${change.reason})`);
   });
 
   console.log('Baseline');

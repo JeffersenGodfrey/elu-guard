@@ -65,15 +65,42 @@ describe('AimdLimiter — control loop', () => {
     limiter.stop();
   });
 
-  test('backs off when observed latency exceeds the configured threshold', () => {
+  test('backs off when the p95 of recent calls exceeds the configured threshold', () => {
     const limiter = new AimdLimiter({
       initialConcurrency: 10,
       maxConcurrency: 20,
       latencyThresholdMs: 25,
       latencyDecreaseFactor: 0.5,
+      latencyWindowSize: 100,
+      latencyMinSamples: 5,
     });
-    limiter.recordLatency(26);
-    expect(limiter.currentLimit).toBe(5);
+    for (let i = 0; i < 5; i++) limiter.recordLatency(10);
+    expect(limiter.currentLimit).toBe(10);
+    limiter.recordLatency(30);
+    limiter.recordLatency(31);
+    expect(limiter.currentLimit).toBeLessThan(10);
+    limiter.stop();
+  });
+
+  test('a single slow call does not shrink the limit before the minimum sample count', () => {
+    const limiter = new AimdLimiter({
+      initialConcurrency: 10,
+      maxConcurrency: 20,
+      latencyThresholdMs: 25,
+      latencyMinSamples: 20,
+    });
+    limiter.recordLatency(100);
+    expect(limiter.currentLimit).toBe(10);
+    limiter.stop();
+  });
+
+  test('limitChange carries the previous limit, the new limit and the reason', () => {
+    const limiter = new AimdLimiter({ initialConcurrency: 16, maxConcurrency: 100 });
+    const seen: Array<{ previousLimit: number; limit: number; reason: string }> = [];
+    limiter.onLimitChange((change) => seen.push(change));
+    limiter.adjust(0.1);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ previousLimit: 16, limit: 20, reason: 'low-elu' });
     limiter.stop();
   });
 

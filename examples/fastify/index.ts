@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
-import { EluGuard, eluGuardFastify } from '../../src';
+import { EluGuard } from '../../src';
+import { eluGuardFastify } from '../../src/fastify';
 
 const app = Fastify();
 

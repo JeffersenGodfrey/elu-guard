@@ -19,9 +19,8 @@ npm install
 | `npm run test:properties` | only the `fast-check` invariant suite |
 | `npm run lint` | eslint over `src/`, `tests/`, `benchmarks/`, `examples/` |
 | `npm run audit:prod` | `npm audit --omit=dev` (gates the tree that actually ships) |
-| `npm run bench` | mixed async-I/O + CPU-spike benchmark (`BENCH_REPS`, `BENCH_PHASE_MS`) |
-| `npm run bench:sync` | the original synchronous benchmark, kept for history |
-| `npm run soak` | sustained mixed workload, checks that permits/probes return to 0 |
+| `npm run bench` | mixed async-I/O + CPU-pressure benchmark, three configs (`BENCH_REPS`, `BENCH_PHASES_MS`, `BENCH_CALLERS`) |
+| `npm run soak` | sustained in-memory mixed workload, checks that permits/probes return to 0 (`SOAK_MINUTES`) |
 | `npm run demo` | live ELU / limit / breaker output |
 | `npm run verify:package` | packs, fresh-installs and consumes the tarball from CJS/ESM/TS |
 | `npm run verify:all` | typecheck + lint + test + coverage + build + package verification |
@@ -37,9 +36,10 @@ npm install
   invariants.
 - Keep `.github/workflows/benchmark.yml`'s methodology intact if you touch a
   benchmark: the phases are deterministic on purpose so results stay comparable.
-- If you touch the public API (`src/index.ts`, option shapes, error types),
-  update `README.md`, `CHANGELOG.md` and `scripts/verify-package.mjs` (its
-  consumers are the executable definition of "consumable").
+- If you touch the public API (`src/index.ts`, the `src/{http,express,fastify}.ts`
+  sub-path entries, option shapes, error types), update `README.md`,
+  `CHANGELOG.md` and `scripts/verify-package.mjs` (its consumers are the
+  executable definition of "consumable").
 
 ## Non-negotiable invariants
 

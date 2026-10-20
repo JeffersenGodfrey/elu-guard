@@ -1,9 +1,9 @@
 # elu-guard
 
-[![npm version](https://img.shields.io/npm/v/@jeffersengodfrey/elu-guard.svg)](https://www.npmjs.com/package/@jeffersengodfrey/elu-guard)
-[![npm types](https://img.shields.io/npm/types/@jeffersengodfrey/elu-guard.svg)](https://www.npmjs.com/package/@jeffersengodfrey/elu-guard)
-[![node](https://img.shields.io/node/v/@jeffersengodfrey/elu-guard.svg)](https://www.npmjs.com/package/@jeffersengodfrey/elu-guard)
-[![license](https://img.shields.io/npm/l/@jeffersengodfrey/elu-guard.svg)](https://github.com/JeffersenGodfrey/elu-guard/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
+[![npm types](https://img.shields.io/npm/types/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
+[![node](https://img.shields.io/node/v/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
+[![license](https://img.shields.io/npm/l/elu-guard.svg)](https://github.com/JeffersenGodfrey/elu-guard/blob/main/LICENSE)
 [![CI](https://github.com/JeffersenGodfrey/elu-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffersenGodfrey/elu-guard/actions/workflows/ci.yml)
 
 Adaptive concurrency limiting with a built-in circuit breaker for Node.js services. In-process, zero runtime dependencies, and framework-agnostic.
@@ -31,7 +31,7 @@ task result -> record success/failure to breaker + limiter -> release slot
 ```
 
 ```ts
-import { createGuard } from '@jeffersengodfrey/elu-guard';
+import { createGuard } from 'elu-guard';
 
 // One guard per dependency: payments, inventory and search do not share health.
 const payments = createGuard({
@@ -51,7 +51,7 @@ A Node service under load degrades in two different ways, and they need differen
 1. **Event loop saturates.** The process is up and the downstream is fine, but every call in flight makes every other call slower. Admitting more concurrency makes this worse, not better. The fix is admission control: admit less temporarily, recover when the loop idles again.
 2. **A dependency breaks.** One downstream starts timing out or returning 5xx. Retrying it and waiting on it wastes capacity others could use. The fix is fail-fast: stop calling it for a while, keep the rest of the service healthy.
 
-`@jeffersengodfrey/elu-guard` is both, composed behind a single `execute()` call. Failure semantics are left to you.
+`elu-guard` is both, composed behind a single `execute()` call. Failure semantics are left to you.
 
 ## Why ELU
 
@@ -138,7 +138,7 @@ reservations, queued waiters, timers - is what most of the test suite is about:
 ## Install
 
 ```bash
-npm install @jeffersengodfrey/elu-guard
+npm install elu-guard
 ```
 
 Node.js 18 or newer (CI runs 20, 22 and 24). The core uses only Node's own
@@ -147,10 +147,10 @@ adapters live behind sub-paths and list their frameworks as optional peer
 dependencies, so nothing is installed unless you import them:
 
 ```ts
-import { createGuard } from '@jeffersengodfrey/elu-guard';                 // core: limiter + breaker + guard
-import { eluGuardHttp } from '@jeffersengodfrey/elu-guard/http';           // node:http, zero dependencies
-import { eluGuardExpress } from '@jeffersengodfrey/elu-guard/express';     // peer: express
-import { eluGuardFastify } from '@jeffersengodfrey/elu-guard/fastify';     // peers: fastify, fastify-plugin
+import { createGuard } from 'elu-guard';                 // core: limiter + breaker + guard
+import { eluGuardHttp } from 'elu-guard/http';           // node:http, zero dependencies
+import { eluGuardExpress } from 'elu-guard/express';     // peer: express
+import { eluGuardFastify } from 'elu-guard/fastify';     // peers: fastify, fastify-plugin
 ```
 
 Each sub-path also re-exports `EluGuard` (and the guard types) so an adapter file
@@ -159,7 +159,7 @@ only needs one import if that is all it uses.
 ## Quick start
 
 ```ts
-import { createGuard } from '@jeffersengodfrey/elu-guard';
+import { createGuard } from 'elu-guard';
 
 const stripeGuard = createGuard({
   limiter: { minConcurrency: 5, maxConcurrency: 100, targetElu: 0.7 },
@@ -235,8 +235,8 @@ handler asks for a second one. Pick one - adapters for inbound routes,
 
 ```ts
 import express from 'express';
-import { EluGuard } from '@jeffersengodfrey/elu-guard';
-import { eluGuardExpress } from '@jeffersengodfrey/elu-guard/express';
+import { EluGuard } from 'elu-guard';
+import { eluGuardExpress } from 'elu-guard/express';
 
 const app = express();
 app.use(eluGuardExpress(new EluGuard({ limiter: { maxConcurrency: 50 } })));

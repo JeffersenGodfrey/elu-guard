@@ -3,12 +3,7 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows [Semantic Versioning](https://semver.org/).
 
-## [1.0.1] - 2026-10-20
-
-### Changed
-- Validate npm Trusted Publishing (OIDC) configuration; no functional changes from 1.0.0.
-
-## [1.0.0] - 2026-10-16
+## [1.0.0] - 2026-10-20
 
 Breaking change: the framework adapters move to opt-in sub-paths with zero
 runtime dependencies, alongside the operational surface needed to put
@@ -52,19 +47,4 @@ runtime dependencies, alongside the operational surface needed to put
 ### Security
 - `npm audit` reports 0 vulnerabilities (dev and production dependency trees); `npm run audit:prod` gates the shipped tree in CI.
 
-## [0.1.0] - Unreleased (never published)
 
-### Added
-- `EluSampler` — wraps Node's `perf_hooks` Event Loop Utilization API.
-- `AimdLimiter` — AIMD-controlled adaptive concurrency limiter driven by ELU, with a `targetElu`/`hysteresis` band, FIFO queueing, queue timeouts, and graceful `stop()` that rejects queued callers instead of hanging them.
-- `CircuitBreaker` — closed/open/half-open state machine over a rolling failure-rate window.
-- `EluGuard` — composes both behind a single `execute()` call; emits `stateChange` and `limitChange` events; exposes `stats()`.
-- Adapters: raw HTTP (`eluGuardHttp`), Express (`eluGuardExpress`), Fastify (`eluGuardFastify`).
-- Examples: basic usage, Express, Fastify, and a self-contained stress demo (`npm run demo`).
-- Benchmark comparing adaptive vs. a fixed-limit baseline under simulated load, with an honest write-up of what the results do and don't show.
-- CI (lint/build/test across Node 18/20/22) and a tag-triggered npm publish workflow.
-
-### Known limitations
-- The mixed I/O + CPU-pressure benchmark is diagnostic evidence, not proof that adaptive mode beats a known fixed limit; on the development machine the fixed-high limit wins while the loop has slack and the adaptive limit wins once CPU pressure pins it, so the result is workload-specific.
-- ELU is a local signal and cannot directly measure worker-thread saturation or an unknown downstream capacity without failure/latency feedback.
-- API surface (option names, defaults) may still change before 1.0.0 based on real-world feedback.

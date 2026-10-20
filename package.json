@@ -1,5 +1,5 @@
 {
-  "name": "elu-guard",
+  "name": "@jeffersengodfrey/elu-guard",
   "version": "1.0.0",
   "packageManager": "npm@10.9.2",
   "description": "Adaptive concurrency limiting (Event Loop Utilization driven, AIMD-controlled) with a built-in circuit breaker for Node.js.",
@@ -21,6 +21,9 @@
   },
   "type": "commonjs",
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": {

@@ -73,6 +73,21 @@ describe('EluGuard', () => {
     await guard.stop();
   });
 
+  test('stop() refuses new work but keeps consumer listeners attached', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    const states: string[] = [];
+    guard.on('stateChange', (s) => states.push(s));
+    expect(guard.listenerCount('stateChange')).toBe(1);
+
+    await guard.stop();
+    await expect(guard.execute(async () => 1)).rejects.toBeInstanceOf(ShuttingDownError);
+    expect(guard.listenerCount('stateChange')).toBe(1);
+
+    // Re-stopping is safe and does not drop the consumer's subscription.
+    await guard.stop();
+    expect(guard.listenerCount('stateChange')).toBe(1);
+  });
+
   test('stop() causes queued execute() calls to reject instead of hanging', async () => {
     const guard = new EluGuard({ limiter: { initialConcurrency: 1, maxConcurrency: 1, queueTimeoutMs: 60000 } });
 
@@ -186,12 +201,19 @@ describe('EluGuard', () => {
     await timeoutGuard.stop();
 
     const abortGuard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
-    abortGuard.on('rejected', (reason) => reasons.push(`abort:${String(reason)}`));
+    const abortReasons: string[] = [];
+    abortGuard.on('rejected', (reason) => {
+      reasons.push(`abort:${String(reason)}`);
+      abortReasons.push(String(reason));
+    });
     const controller = new AbortController();
     const pending = abortGuard.execute(() => new Promise(() => undefined), { signal: controller.signal });
     controller.abort();
     await expect(pending).rejects.toThrow();
     expect(reasons).toContain('abort:aborted');
+    // A caller abort after admission must emit exactly one 'aborted', or
+    // rejection metrics double-count it against every other refusal reason.
+    expect(abortReasons.filter((reason) => reason === 'aborted')).toHaveLength(1);
     await abortGuard.stop();
   });
 

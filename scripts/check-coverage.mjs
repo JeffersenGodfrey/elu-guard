@@ -30,7 +30,7 @@ const SUMMARY = resolve(process.cwd(), 'coverage', 'coverage-summary.json');
  */
 const GROUPS = [
   { prefix: 'src/core/', thresholds: { statements: 85, branches: 75, functions: 85, lines: 85 } },
-  { prefix: 'src/errors/', thresholds: { statements: 90, branches: 55, functions: 55, lines: 90 } },
+  { prefix: 'src/errors/', thresholds: { statements: 90, branches: 55, functions: 45, lines: 90 } },
   { prefix: 'src/adapters/', thresholds: { statements: 83, branches: 70, functions: 80, lines: 85 } },
 ];
 

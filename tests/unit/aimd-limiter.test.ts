@@ -20,12 +20,91 @@ describe('AimdLimiter — control loop', () => {
     limiter.stop();
   });
 
-  test('does not report a limit below active permits while shrinking', async () => {
-    const limiter = new AimdLimiter({ initialConcurrency: 10, maxConcurrency: 10, decreaseFactor: 0.5 });
+  test('the limit drops below active permits under pressure, shedding future admissions', async () => {
+    const limiter = new AimdLimiter({ initialConcurrency: 10, maxConcurrency: 10, minConcurrency: 5, decreaseFactor: 0.5 });
     for (let i = 0; i < 10; i++) await limiter.acquire();
     limiter.adjust(0.9);
+    // The controller's target is floor(10 * 0.5) = 5. It must be allowed to
+    // fall below the 10 already-admitted calls so admission can stop; those
+    // calls keep running and drain naturally. See the regression test below.
+    expect(limiter.currentLimit).toBe(5);
     expect(limiter.currentInFlight).toBe(10);
-    expect(limiter.currentLimit).toBe(10);
+    limiter.stop();
+  });
+
+  test('REGRESSION: a lower target stops new admissions while in-flight work drains', async () => {
+    const limiter = new AimdLimiter({
+      initialConcurrency: 10,
+      maxConcurrency: 10,
+      minConcurrency: 5,
+      decreaseFactor: 0.5,
+      queueTimeoutMs: 60000,
+    });
+    // Fill to the limit; these stay unresolved.
+    for (let i = 0; i < 10; i++) await limiter.acquire();
+    expect(limiter.currentInFlight).toBe(10);
+
+    // Sustained high ELU: the controller wants the limit at 5.
+    limiter.adjust(0.95);
+    expect(limiter.currentLimit).toBe(5); // target is now below occupancy
+
+    // A new caller must queue, not run, while in-flight (10) >= target (5).
+    let settled = false;
+    const queued = limiter.acquire().then(
+      () => { settled = true; },
+      () => { settled = true; },
+    );
+    expect(limiter.queueLength).toBe(1);
+
+    // Draining down TO the target must not refill the queue: 5 < 5 is false.
+    for (let i = 0; i < 5; i++) limiter.release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(limiter.currentInFlight).toBe(5);
+    expect(settled).toBe(false);
+    expect(limiter.queueLength).toBe(1);
+
+    // Dropping BELOW the target admits exactly one queued caller.
+    limiter.release();
+    await queued;
+    expect(limiter.currentInFlight).toBe(5);
+    expect(limiter.queueLength).toBe(0);
+    limiter.stop();
+  });
+
+  test('REGRESSION: the limit recovers after pressure clears and never exceeds max', async () => {
+    const limiter = new AimdLimiter({ initialConcurrency: 10, minConcurrency: 5, maxConcurrency: 50, decreaseFactor: 0.5, queueTimeoutMs: 60000 });
+    for (let i = 0; i < 10; i++) await limiter.acquire();
+    limiter.adjust(0.95);
+    expect(limiter.currentLimit).toBe(5);
+    // Drain the already-admitted work.
+    for (let i = 0; i < 10; i++) limiter.release();
+    expect(limiter.currentInFlight).toBe(0);
+    // Healthy ELU: additive increase resumes and stays within bounds.
+    limiter.adjust(0.1);
+    expect(limiter.currentLimit).toBeGreaterThan(5);
+    expect(limiter.currentLimit).toBeLessThanOrEqual(50);
+    limiter.stop();
+  });
+
+  test('REGRESSION: aborting a queued caller while the target is below occupancy keeps accounting consistent', async () => {
+    const limiter = new AimdLimiter({ initialConcurrency: 2, maxConcurrency: 2, minConcurrency: 1, decreaseFactor: 0.5, queueTimeoutMs: 60000 });
+    await limiter.acquire();
+    await limiter.acquire();
+    limiter.adjust(0.95); // target -> 1
+    expect(limiter.currentLimit).toBe(1);
+
+    const ctrl = new AbortController();
+    const queued = limiter.acquire(ctrl.signal);
+    expect(limiter.queueLength).toBe(1);
+    ctrl.abort();
+    await expect(queued).rejects.toBeInstanceOf(LimiterAbortedError);
+    // The aborted caller is removed from the queue immediately and never runs.
+    expect(limiter.queueLength).toBe(0);
+
+    // Releasing an active slot does not resurrect the aborted caller.
+    limiter.release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(limiter.queueLength).toBe(0);
     limiter.stop();
   });
 

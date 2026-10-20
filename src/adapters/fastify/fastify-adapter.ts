@@ -49,6 +49,12 @@ function buildPlugin(guard: EluGuard): FastifyPluginAsync {
         if (reply.raw.writableEnded === false) settle('abort');
         else settle(reply.statusCode < 500 ? 'success' : 'failure');
       };
+      // Why two hooks: `onResponse` handles the normal completed reply, while
+      // `close` on the raw reply catches the case where the socket dies before
+      // Fastify finishes the lifecycle (or after, where `settled` makes the
+      // second call a no-op). The `settled` flag is what keeps exactly-once
+      // accounting across both paths, including when `destroyed` is already
+      // true at hook time and `onResponse` still fires later.
       reply.raw.once('close', onReplyDone);
       if (reply.raw.destroyed) onReplyDone(); // the client was already gone
     });

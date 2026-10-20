@@ -134,7 +134,9 @@ reservations, queued waiters, timers - is what most of the test suite is about:
 - every `acquire()` has exactly one matching `release()`, on every path;
 - a rejected limiter acquisition never leaves a half-open probe reserved;
 - a caller abort or client disconnect never counts as a dependency failure;
-- `0 <= inFlight <= currentLimit` always.
+- the limit is a control target: in-flight work may transiently exceed it while
+  draining, but no new call is admitted while `inFlight >= limit`, and
+  `inFlight` never goes negative or exceeds `maxConcurrency`.
 
 ## Install
 
@@ -221,8 +223,14 @@ There are two ways to attach a guard, and they are not interchangeable:
 
 | | Use it for | What guards the call | Who classifies the outcome |
 |---|---|---|---|
-| `guard.execute(fn)` | calls your code makes to a dependency | breaker probe + limiter permit | the guard, in-process |
+| `guard.execute(fn)` | calls your code makes to a dependency | breaker probe + limiter permit | the guard, using your `isFailure` / `retryAfterMs` / timeout config |
 | `eluGuardHttp` / `eluGuardExpress` / `eluGuardFastify` | inbound routes that *are* the edge to one dependency | breaker probe + limiter permit | the response: 5xx fails, client disconnect does not |
+
+The adapters deliberately do not run the `execute()` pipeline: no per-request
+timeout, no `isFailure` classification, no `retryAfterMs` pause, no `fallback`,
+and no `rejected` event. If you need those on an inbound route, keep the
+adapter for admission and wrap the downstream call itself with
+`guard.execute()` — but do not stack both on the same permit path.
 
 Do not stack both on the same route: the adapter would hold one permit while your
 handler asks for a second one. Pick one - adapters for inbound routes,
@@ -349,15 +357,17 @@ npm run demo    # self-contained stress demo
 ```
 
 `npm run bench` forks a separate downstream server process (so its latency is not
-distorted by the load generator) and a CPU-pressure helper, then walks the same
-callers through four phases - steady, pressure, heavy, recovery - against fixed
-limits of 10 and 100 and the adaptive controller. It reports per-phase medians
-over `BENCH_REPS` repetitions (default 3) for throughput, p50/p95/p99 latency,
-rejections, errors, average ELU, average limit and peak in-flight, so adaptive can
+distorted by the load generator) and burns CPU *in-process* between requests
+(because ELU measures this process's loop, only this loop's saturation moves the
+controller). It walks the same callers through five phases - warmup (discarded),
+steady, pressure, heavy, recovery - against fixed limits of 10 and 100 and the
+adaptive controller. It reports per-phase medians over `BENCH_REPS` repetitions
+(default 3) for throughput, p50/p95/p99 latency, rejections, errors, average
+ELU, average event-loop delay, average limit and peak in-flight, so adaptive can
 be compared against both a floor and a ceiling rather than a single baseline.
 
 ```bash
-BENCH_REPS=5 BENCH_PHASES_MS='10000,15000,15000,10000' npm run bench
+BENCH_REPS=5 BENCH_PHASES_MS='5000,5000,8000,8000,5000' npm run bench
 ```
 
 This is diagnostic evidence from one machine, not a claim that adaptive

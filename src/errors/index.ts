@@ -5,22 +5,10 @@ interface CodedOptions {
   cause?: unknown;
 }
 
-function errorWithCause(err: Error, options?: CodedOptions): Error {
-  if (options && 'cause' in options && (err as { cause?: unknown }).cause === undefined) {
-    try {
-      (err as { cause?: unknown }).cause = options.cause;
-    } catch {
-      // ignore
-    }
-  }
-  return err;
-}
-
 class NamedError extends Error {
   constructor(name: string, message: string, options?: CodedOptions) {
-    super(message);
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = name;
-    errorWithCause(this, options);
   }
 }
 

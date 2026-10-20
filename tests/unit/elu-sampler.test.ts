@@ -55,4 +55,72 @@ describe('EluSampler', () => {
     });
     sampler.start();
   });
+
+  test('start() creates exactly one timer across two start() calls', () => {
+    const spy = jest.spyOn(global, 'setInterval');
+    try {
+      const sampler = new EluSampler({ intervalMs: 15 });
+      try {
+        sampler.start();
+        sampler.start();
+        expect(spy).toHaveBeenCalledTimes(1);
+      } finally {
+        sampler.stop();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('calls unref() on the sampling timer when available', () => {
+    const unref = jest.fn();
+    const spy = jest.spyOn(global, 'setInterval').mockReturnValue({ unref } as unknown as NodeJS.Timeout);
+    try {
+      const sampler = new EluSampler({ intervalMs: 15 });
+      try {
+        sampler.start();
+        expect(unref).toHaveBeenCalledTimes(1);
+      } finally {
+        sampler.stop();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('starts without throwing when the timer has no unref()', () => {
+    const spy = jest.spyOn(global, 'setInterval').mockReturnValue({} as unknown as NodeJS.Timeout);
+    try {
+      const sampler = new EluSampler({ intervalMs: 15 });
+      try {
+        expect(() => sampler.start()).not.toThrow();
+      } finally {
+        sampler.stop();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('uses the default interval when no options are given', () => {
+    const spy = jest.spyOn(global, 'setInterval');
+    try {
+      const sampler = new EluSampler();
+      try {
+        expect(sampler.current).toBe(0);
+        sampler.start();
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0][1]).toBe(1000);
+      } finally {
+        sampler.stop();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('stop() before start() is safe', () => {
+    const sampler = new EluSampler({ intervalMs: 20 });
+    expect(() => sampler.stop()).not.toThrow();
+  });
 });

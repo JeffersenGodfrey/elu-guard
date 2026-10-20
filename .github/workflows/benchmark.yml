@@ -10,9 +10,9 @@ on:
         required: false
         default: '3'
       phase_ms:
-        description: 'Kept for compatibility; the four phase durations now come from BENCH_PHASES_MS'
+        description: 'Kept for compatibility; the benchmark derives five phase durations (warmup, steady, pressure, heavy, recover) from BENCH_PHASES_MS'
         required: false
-        default: '5000,8000,8000,5000'
+        default: '5000,5000,8000,8000,5000'
       soak_minutes:
         description: 'Minutes for the leak soak run'
         required: false
@@ -33,7 +33,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Mixed workload benchmark (fixed-low vs fixed-high vs adaptive)
-        run: BENCH_REPS=${{ inputs.reps }} BENCH_PHASES_MS='5000,8000,8000,5000' npm run bench | tee bench.txt
+        run: BENCH_REPS=${{ inputs.reps }} BENCH_PHASES_MS='${{ inputs.phase_ms }}' npm run bench | tee bench.txt
       - name: Soak (permit / probe leak check)
         run: SOAK_MINUTES=${{ inputs.soak_minutes }} npm run soak | tee soak.txt
       - uses: actions/upload-artifact@v4
@@ -52,5 +52,4 @@ jobs:
             echo '```'
             cat soak.txt
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
           } >> "$GITHUB_STEP_SUMMARY"

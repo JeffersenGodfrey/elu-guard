@@ -51,7 +51,9 @@ them is a bug, not a design discussion:
    limiter rejection, shutdown).
 2. A rejected limiter `acquire()` never leaves a half-open probe reserved.
 3. A caller abort or client disconnect never counts as a downstream failure.
-4. `0 <= inFlight <= currentLimit` at all times.
+4. `inFlight` is never negative and never exceeds `maxConcurrency`; a new call
+   is admitted only while `inFlight < currentLimit`, so `currentLimit` may sit
+   below `inFlight` while already-admitted work drains.
 5. `stop()` clears timers, stops the ELU sampler and rejects queued callers.
 
 ## Code style

@@ -286,7 +286,6 @@ export class EluGuard extends EventEmitter {
             err instanceof GuardAbortedError
               ? err
               : new GuardAbortedError('Operation aborted by the caller', { cause: err });
-          this.emit('rejected', 'aborted');
           if (options.fallback) return options.fallback(abortErr);
           throw abortErr;
         }

@@ -75,11 +75,8 @@ export class ShuttingDownError extends Error {
  */
 export class LimiterAbortedError extends Error {
   constructor(message = 'Aborted while waiting for a slot', options?: { cause?: unknown }) {
-    super(message);
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'LimiterAbortedError';
-    if (options && options.cause !== undefined) {
-      (this as { cause?: unknown }).cause = options.cause;
-    }
   }
 }
 
@@ -174,8 +171,12 @@ export class AimdLimiter {
     const low = Math.max(0, this.opts.targetElu - this.opts.hysteresis);
     let reason: LimitChangeReason | null = null;
     if (elu >= this.opts.targetElu) {
+      // The target is deliberately allowed to fall below the current in-flight
+      // count: admission stops immediately (see acquire()), and the work
+      // already admitted drains naturally. Baking inFlight into the limit here
+      // would silently discard the backoff exactly when the loop is most
+      // saturated, pinning concurrency at its peak instead of shedding it.
       this.limit = Math.max(
-        this.inFlight,
         this.opts.minConcurrency,
         Math.floor(this.limit * this.opts.decreaseFactor),
       );
@@ -222,7 +223,7 @@ export class AimdLimiter {
     const previousLimit = this.limit;
     this.limit = Math.min(
       this.opts.maxConcurrency,
-      Math.max(this.inFlight, this.opts.minConcurrency, Math.floor(this.limit * factor)),
+      Math.max(this.opts.minConcurrency, Math.floor(this.limit * factor)),
     );
     if (this.limit !== previousLimit) {
       this.emitLimitChange(previousLimit, this.limit, this.sampler.current, reason);
@@ -269,6 +270,13 @@ export class AimdLimiter {
     }
   }
 
+  /**
+   * The controller's current concurrency target. This is the value the
+   * admission check (`inFlight < currentLimit`) is compared against, and under
+   * sustained pressure it may sit *below* `currentInFlight` while
+   * already-admitted work drains — no new call is admitted until in-flight
+   * drops back under it.
+   */
   get currentLimit(): number {
     return this.limit;
   }

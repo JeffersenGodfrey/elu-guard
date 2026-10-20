@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-10-16
 
 Breaking change: the framework adapters move to opt-in sub-paths with zero
 runtime dependencies, alongside the operational surface needed to put
@@ -21,8 +21,8 @@ runtime dependencies, alongside the operational surface needed to put
 - **`ExecutionContext`**: the task receives `{ signal }` so downstream SDKs can be cancelled on timeout/abort.
 - New error classes with `cause` support: `ConcurrencyLimitError`, `GuardTimeoutError`, `GuardAbortedError` (joining `CircuitOpenError`, `ShuttingDownError`, `LimitRejectedError`).
 - **Dual module build**: `dist/cjs` (`.js` + `.d.ts`) and `dist/esm` (`.mjs` + `.d.mts`) with a conditional `exports` map, validated with `publint` and `@arethetypeswrong/cli`.
-- New benchmarks: `npm run bench` (mixed async I/O + CPU-pressure phases comparing fixed-low and fixed-high limits against adaptive, with a forked downstream server and CPU-pressure helper, medians over repetitions) and `npm run soak` (permit/probe leak check over time); `npm run demo` stress demo. The stale compare/CPU-heavy/overload/fragile-downstream/bench:sync scripts are gone.
-- Property-based invariant tests (`fast-check`) covering limiter accounting and breaker state transitions, alongside expanded unit and adapter suites (83 tests).
+- New benchmarks: `npm run bench` (mixed async I/O + in-process CPU-pressure phases comparing fixed-low and fixed-high limits against adaptive, with a forked downstream server, warmup phase, event-loop-delay reporting and medians over repetitions) and `npm run soak` (permit/probe leak check over time); `npm run demo` stress demo. The stale compare/CPU-heavy/overload/fragile-downstream/bench:sync scripts are gone.
+- Property-based invariant tests (`fast-check`) covering limiter accounting and breaker state transitions, alongside expanded unit and adapter suites (86 tests).
 - New guard regression tests: deadlines/aborts that a task ignores, deadline expiry while queued, late settlement of an abandoned task, and probe hand-back on abort during half-open.
 
 ### Changed
@@ -36,6 +36,7 @@ runtime dependencies, alongside the operational surface needed to put
 - Dev toolchain refreshed: `@typescript-eslint/*` v8 (supports TypeScript 5.9 without the unsupported-version warning), `tsup` dual output, unused `autocannon` devDependency removed.
 
 ### Fixed
+- **Adaptive limit can now fall below in-flight work.** The AIMD decrease and the failure/latency backoff were clamped to the current in-flight count (`Math.max(inFlight, min, ...)`), so under sustained saturation the controller's reduction was silently discarded and the effective concurrency stayed pinned at its peak instead of shedding load — precisely when backoff matters most. The clamp is removed: the target is allowed to drop below occupancy, admission stops immediately (no new call is admitted while `inFlight >= limit`), and already-admitted work drains naturally. The old `inFlight <= currentLimit` invariant is replaced by "a new call is admitted only while `inFlight < limit`"; `currentLimit` may sit below `currentInFlight` while draining. Regression tests cover a target-below-occupancy stop, recovery after pressure clears, and aborting a queued caller while the target is below occupancy.
 - **Controller bound safety**: asymmetric `minConcurrency`/`maxConcurrency` settings can no longer make feedback raise the active limit above the configured maximum.
 - **Coverage gate parser**: recursive glob text in the coverage script could terminate its own block comment under Node; the release gate now executes correctly.
 - **Deadlines are now enforced, not suggested.** `execute()` rejects with `GuardTimeoutError` even when the task ignores `ctx.signal`; previously an in-flight task that never settled left the returned promise pending forever (and the deadline timer was `unref`'d, so it could not fire in a short-lived script at all). Abandoned tasks are left to finish on their own — their late settlement is ignored and cannot become an unhandled rejection.

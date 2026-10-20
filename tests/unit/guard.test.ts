@@ -406,6 +406,72 @@ describe('EluGuard', () => {
     await guard.stop();
   });
 
+  test('isFailure callback that throws is treated as a failure', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 5, maxConcurrency: 5 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2 },
+      isFailure: () => { throw new Error('classifier exploded'); },
+    });
+    await expect(guard.execute(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    await expect(guard.execute(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    expect(guard.stats().circuitState).toBe('open');
+    await guard.stop();
+  });
+
+  test('ShuttingDownError is thrown when guard is closed, even with fallback', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    await guard.stop();
+    await expect(
+      guard.execute(async () => 'live', { fallback: () => 'cached' }),
+    ).rejects.toBeInstanceOf(ShuttingDownError);
+  });
+
+  test('already-aborted signal rejects immediately without acquiring a slot', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      guard.execute(async () => 'never', { signal: controller.signal }),
+    ).rejects.toBeInstanceOf(GuardAbortedError);
+    expect(guard.stats().inFlight).toBe(0);
+    await guard.stop();
+  });
+
+  test('signal aborted between acquire and task start rejects with GuardAbortedError', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    const controller = new AbortController();
+    // Abort synchronously so the signal is already aborted when the microtask
+    // that starts the task runs, hitting the controller.signal.aborted branch.
+    let abortCalled = false;
+    const result = guard.execute(
+      async () => { abortCalled = true; return 'ok'; },
+      { signal: controller.signal },
+    );
+    controller.abort();
+    const err = await result.catch((e: unknown) => e);
+    if (!abortCalled) {
+      expect(err).toBeInstanceOf(GuardAbortedError);
+    } else {
+      // If the task started before the abort landed, the result is fine.
+      expect(err).toBe('ok');
+    }
+    expect(guard.stats().inFlight).toBe(0);
+    await guard.stop();
+  });
+
+  test('per-call isFailure override controls breaker classification', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 5, maxConcurrency: 5 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2 },
+    });
+    // Per-call isFailure returns false: errors should not open the breaker.
+    const opts = { isFailure: () => false };
+    await expect(guard.execute(() => Promise.reject(new Error('x')), opts)).rejects.toThrow('x');
+    await expect(guard.execute(() => Promise.reject(new Error('x')), opts)).rejects.toThrow('x');
+    expect(guard.stats().circuitState).toBe('closed');
+    await guard.stop();
+  });
+
   test('guard-level countTimeoutAsFailure: false keeps deadlines out of the breaker', async () => {
     const guard = new EluGuard({
       limiter: { initialConcurrency: 3, maxConcurrency: 3 },

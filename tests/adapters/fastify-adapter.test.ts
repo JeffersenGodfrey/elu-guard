@@ -38,6 +38,45 @@ describe('eluGuardFastify adapter (integration)', () => {
     await guard.stop();
   });
 
+  test('returns 503 when the concurrency queue is full', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 1, maxConcurrency: 1, maxQueueLength: 0, queueTimeoutMs: 1000 },
+    });
+    const app = Fastify();
+    await app.register(eluGuardFastify(guard));
+    app.get('/', async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      return { ok: true };
+    });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    const port = address && typeof address === 'object' ? address.port : 0;
+
+    const [first, second] = await Promise.all([
+      fetch(`http://127.0.0.1:${port}/`),
+      fetch(`http://127.0.0.1:${port}/`),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 503]);
+
+    await app.close();
+    await guard.stop();
+  });
+
+  test('non-LimitRejected acquire error is rethrown as a 500', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 2, maxConcurrency: 2 } });
+    const app = Fastify();
+    await app.register(eluGuardFastify(guard));
+    app.get('/', async () => ({ ok: true }));
+
+    // Stop the guard so acquire throws ShuttingDownError (not LimitRejectedError).
+    await guard.stop();
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(500);
+
+    await app.close();
+  });
+
   test('client disconnect frees the slot without counting a breaker failure', async () => {
     const guard = new EluGuard({
       limiter: { initialConcurrency: 2, maxConcurrency: 2 },
@@ -95,8 +134,6 @@ describe('eluGuardFastify adapter (integration)', () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(guard.stats().circuitState).toBe('half-open');
 
-    // The half-open allowance is 1, so the probe below is the only call that
-    // can be admitted until it is handed back.
     mode = 'hang';
     const socket = connect(port, '127.0.0.1');
     await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
@@ -107,8 +144,6 @@ describe('eluGuardFastify adapter (integration)', () => {
     socket.destroy();
     await new Promise((r) => setTimeout(r, 200));
 
-    // Leaking this reservation would leave the breaker rejecting every request
-    // forever while looking "recoverable".
     expect(guard.stats().probes).toBe(0);
     expect(guard.stats().circuitState).toBe('half-open');
 

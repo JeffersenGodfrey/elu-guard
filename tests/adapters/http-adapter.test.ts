@@ -136,4 +136,73 @@ describe('eluGuardHttp adapter (integration)', () => {
     await close(server);
     await guard.stop();
   });
+
+  test('a 5xx response counts as a breaker failure', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 5, maxConcurrency: 5 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2 },
+    });
+    const server = createServer(
+      eluGuardHttp(guard, (_req, res) => {
+        res.statusCode = 500;
+        res.end('error');
+      }),
+    );
+    const port = await listen(server);
+
+    await fetch(`http://127.0.0.1:${port}/`);
+    await fetch(`http://127.0.0.1:${port}/`);
+    expect(guard.stats().circuitState).toBe('open');
+
+    await close(server);
+    await guard.stop();
+  });
+
+  test('handler throws with headers already sent destroys the socket and frees the slot', async () => {
+    const guard = new EluGuard({ limiter: { initialConcurrency: 1, maxConcurrency: 1 } });
+    const server = createServer(
+      eluGuardHttp(guard, async (_req, res) => {
+        res.writeHead(200);
+        res.write('partial');
+        throw new Error('handler failed mid-stream');
+      }),
+    );
+    const port = await listen(server);
+
+    await fetch(`http://127.0.0.1:${port}/`).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(guard.stats().inFlight).toBe(0);
+
+    await close(server);
+    await guard.stop();
+  });
+
+  test('half-open probe is released after a successful response', async () => {
+    const guard = new EluGuard({
+      limiter: { initialConcurrency: 5, maxConcurrency: 5 },
+      breaker: { failureThreshold: 0.5, minimumRequests: 2, resetTimeoutMs: 20, halfOpenMaxCalls: 1 },
+    });
+    let fail = true;
+    const server = createServer(
+      eluGuardHttp(guard, (_req, res) => {
+        res.statusCode = fail ? 500 : 200;
+        res.end(fail ? 'error' : 'ok');
+      }),
+    );
+    const port = await listen(server);
+
+    await fetch(`http://127.0.0.1:${port}/`);
+    await fetch(`http://127.0.0.1:${port}/`);
+    expect(guard.stats().circuitState).toBe('open');
+    await new Promise((r) => setTimeout(r, 40));
+    expect(guard.stats().circuitState).toBe('half-open');
+
+    fail = false;
+    await fetch(`http://127.0.0.1:${port}/`);
+    expect(guard.stats().probes).toBe(0);
+    expect(guard.stats().circuitState).toBe('closed');
+
+    await close(server);
+    await guard.stop();
+  });
 });

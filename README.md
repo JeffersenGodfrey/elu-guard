@@ -369,7 +369,8 @@ BENCH_REPS=5 BENCH_PHASES_MS='5000,5000,8000,8000,5000' npm run bench
 
 This is diagnostic evidence from one machine, not a claim that adaptive
 concurrency always wins. A 3-repetition run on the development machine behind
-this README (220 callers, 30 ms downstream, default phases) produced:
+this README (13th Gen Intel Core i7-1360P, 15.7 GB RAM, Windows 11, Node 22.14.0,
+220 callers, 30 ms downstream, default phases) produced:
 
 | phase | fixed-low(10) rps / p95 | fixed-high(100) rps / p95 | adaptive(5..100) rps / p95 |
 |---|---|---|---|

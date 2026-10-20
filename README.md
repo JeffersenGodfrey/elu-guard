@@ -3,21 +3,31 @@
 [![npm version](https://img.shields.io/npm/v/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
 [![npm types](https://img.shields.io/npm/types/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
 [![node](https://img.shields.io/node/v/elu-guard.svg)](https://www.npmjs.com/package/elu-guard)
-[![license](https://img.shields.io/npm/l/elu-guard.svg)](./LICENSE)
+[![license](https://img.shields.io/npm/l/elu-guard.svg)](https://github.com/JeffersenGodfrey/elu-guard/blob/main/LICENSE)
 [![CI](https://github.com/JeffersenGodfrey/elu-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffersenGodfrey/elu-guard/actions/workflows/ci.yml)
 
-Adaptive concurrency limiting + circuit breaking for Node.js services, in-process
-and framework-agnostic.
+Adaptive concurrency limiting with a built-in circuit breaker for Node.js services. In-process, zero runtime dependencies, and framework-agnostic.
 
-One guard protects one downstream dependency. The guard decides whether a call is
-admitted *now* (based on how saturated your event loop actually is) and whether the
-dependency looks healthy *at all* (based on the failures you tell it to count):
+One guard protects one downstream dependency. It decides whether a call is admitted now based on how saturated your event loop actually is, and whether the dependency looks healthy at all based on the failures you tell it to count.
+
+![Architecture](docs/architecture.png)
 
 ```
-        ELU  ->  AIMD  ->  adaptive concurrency limit  ->  circuit breaker  ->  downstream
-   (how busy      (back off /     (how many calls may be    (fail fast while the
-    the event      recover)        in flight right now)      dependency is broken)
-    loop is)
+execute(fn, opts)
+      |
+      v
+circuit breaker --open--> fail fast (CircuitOpenError) or fallback
+      |
+admitted
+      v
+limiter.acquire() --no slot--> queue -> reject / timeout
+      |                         |
+      |  slot granted           +--> queued callers freed on deadline or caller abort
+      v
+deadline + AbortController --> ctx.signal handed to your task
+      |
+      v
+task result -> record success/failure to breaker + limiter -> release slot
 ```
 
 ```ts
@@ -36,29 +46,16 @@ const charge = await payments.execute(({ signal }) => stripe.charge(amount, { si
 
 ## The problem
 
-A Node service under load degrades in two different ways, and they need two
-different responses:
+A Node service under load degrades in two different ways, and they need different responses:
 
-1. **The event loop saturates.** The process is up and the downstream is fine,
-   but every request in flight makes every other request slower. Admitting *more*
-   concurrency makes this worse, not better. The fix is admission control:
-   temporarily admit less, recover when the loop is idle again.
-2. **A dependency breaks.** One downstream starts timing out or returning 5xx.
-   Retrying it and waiting on it wastes capacity everyone else could use. The fix
-   is fail-fast: stop calling it for a while, keep the rest of the service healthy.
+1. **Event loop saturates.** The process is up and the downstream is fine, but every call in flight makes every other call slower. Admitting more concurrency makes this worse, not better. The fix is admission control: admit less temporarily, recover when the loop idles again.
+2. **A dependency breaks.** One downstream starts timing out or returning 5xx. Retrying it and waiting on it wastes capacity others could use. The fix is fail-fast: stop calling it for a while, keep the rest of the service healthy.
 
-`elu-guard` is both, composed behind a single `execute()` call, with the failure
-semantics left to you.
+`elu-guard` is both, composed behind a single `execute()` call. Failure semantics are left to you.
 
-## Why ELU (and not latency, CPU% or RPS)
+## Why ELU
 
-CPU% tells you what the machine is doing, not what *your process* is waiting on.
-Latency tells you a call was slow, but not whether that was your process or the
-dependency (and latency-based schemes need their own circuit-breaking to avoid
-treating a slow dependency as a slow process). `perf_hooks.eventLoopUtilization()`
-measures how much of the last window your event loop spent active versus idle -
-a direct signal of local saturation, unrelated to how slow any single downstream
-is. That is the signal the control loop reacts to.
+CPU% tells you what the machine is doing, not what your process is waiting on. Latency tells you a call was slow, but not whether that was your process or the dependency. `perf_hooks.eventLoopUtilization()` measures how much of the last window your event loop spent active versus idle—a direct signal of local saturation, unrelated to how slow any single downstream is. That is the signal the control loop reacts to.
 
 ## How it works
 

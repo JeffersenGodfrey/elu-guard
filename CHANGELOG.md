@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-10-20
+
+### Changed
+- Validate npm Trusted Publishing (OIDC) configuration; no functional changes from 1.0.0.
+
 ## [1.0.0] - 2026-10-16
 
 Breaking change: the framework adapters move to opt-in sub-paths with zero

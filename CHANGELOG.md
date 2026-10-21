@@ -10,7 +10,7 @@ runtime dependencies, alongside the operational surface needed to put
 `elu-guard` in front of a real dependency (cancellation, deadlines, fallback).
 
 ### Added
-- **Sub-path adapters**: `elu-guard/http`, `elu-guard/express` and `elu-guard/fastify` are separate entries (each re-exporting the core), so the root entry no longer pulls in framework types. `express`, `fastify` and `fastify-plugin` are optional **peer** dependencies, and the shipped package now has zero runtime dependencies.
+- **Sub-path adapters**: `node-elu-guard/http`, `node-elu-guard/express` and `node-elu-guard/fastify` are separate entries (each re-exporting the core), so the root entry no longer pulls in framework types. `express`, `fastify` and `fastify-plugin` are optional **peer** dependencies, and the shipped package now has zero runtime dependencies.
 - **Conservative adaptive control**: the limiter now starts at `minConcurrency` by default, accepts classified failure feedback, optional latency feedback, and an optional `retryAfterMs` hook that temporarily pauses admissions after downstream rate limiting.
 - **`limitChange` now carries a `LimitChange` object** (`{ previousLimit, limit, elu, reason }`) plus a `LimitChangeReason` union (`low-elu` | `high-elu` | `failure` | `latency` | `retry-after`), so consumers can tell an ELU decrease apart from a failure/latency backoff and from the new rate-limit `pause()`, which emits `retry-after`; the limiter also exposes `pause()` and a `latencyP95` getter.
 - **`rejected` event** on `EluGuard`, with a `RejectedReason` union (`circuit-open` | `limiter` | `timeout` | `aborted`), for metrics that need to count refusals without catching exceptions.
@@ -26,7 +26,7 @@ runtime dependencies, alongside the operational surface needed to put
 - New guard regression tests: deadlines/aborts that a task ignores, deadline expiry while queued, late settlement of an abandoned task, and probe hand-back on abort during half-open.
 
 ### Changed
-- **Adapters moved off the root entry**: `eluGuardHttp`, `eluGuardExpress` and `eluGuardFastify` are no longer exported from `elu-guard`; import them from their sub-path instead. Framework packages became optional peers (and `fastify-plugin` left `dependencies`).
+- **Adapters moved off the root entry**: `eluGuardHttp`, `eluGuardExpress` and `eluGuardFastify` are no longer exported from `node-elu-guard`; import them from their sub-path instead. Framework packages became optional peers (and `fastify-plugin` left `dependencies`).
 - `CircuitBreaker` internals: `canPass()` is replaced by `tryAcquire()`, which returns an `Admission` union (`allow` / `probe` / `reject`) so callers explicitly release half-open probes. Adapters were migrated accordingly.
 - `EluGuard` emits `stateChange` / `limitChange` from the guarded path and exposes `close()` as an alias of `stop()`.
 - `AimdLimiter.acquire()` accepts an optional `AbortSignal`; waiters are removed from the queue on abort or timeout.

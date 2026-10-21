@@ -75,10 +75,10 @@ function assertPackContents() {
 
 const CJS_CONSUMER = [
   "const assert = require('node:assert');",
-  "const { EluGuard, CircuitOpenError, GuardTimeoutError, ConcurrencyLimitError } = require('elu-guard');",
-  "const { eluGuardHttp } = require('elu-guard/http');",
-  "const { eluGuardExpress } = require('elu-guard/express');",
-  "const { eluGuardFastify } = require('elu-guard/fastify');",
+  "const { EluGuard, CircuitOpenError, GuardTimeoutError, ConcurrencyLimitError } = require('node-elu-guard');",
+  "const { eluGuardHttp } = require('node-elu-guard/http');",
+  "const { eluGuardExpress } = require('node-elu-guard/express');",
+  "const { eluGuardFastify } = require('node-elu-guard/fastify');",
   '',
   'async function main() {',
   "  assert.strictEqual(typeof EluGuard, 'function');",
@@ -121,10 +121,10 @@ const CJS_CONSUMER = [
 
 const ESM_CONSUMER = [
   "import assert from 'node:assert';",
-  "import { EluGuard, CircuitOpenError, GuardTimeoutError } from 'elu-guard';",
-  "import { eluGuardHttp } from 'elu-guard/http';",
-  "import { eluGuardExpress } from 'elu-guard/express';",
-  "import { eluGuardFastify } from 'elu-guard/fastify';",
+  "import { EluGuard, CircuitOpenError, GuardTimeoutError } from 'node-elu-guard';",
+  "import { eluGuardHttp } from 'node-elu-guard/http';",
+  "import { eluGuardExpress } from 'node-elu-guard/express';",
+  "import { eluGuardFastify } from 'node-elu-guard/fastify';",
   '',
   'const guard = new EluGuard({',
   '  limiter: { minConcurrency: 2, maxConcurrency: 2, maxQueueLength: 0, queueTimeoutMs: 50 },',
@@ -150,7 +150,7 @@ const ESM_CONSUMER = [
 ].join('\n');
 
 const CORE_TS_CONSUMER = [
-  "import { EluGuard, CircuitState, GuardTimeoutError } from 'elu-guard';",
+  "import { EluGuard, CircuitState, GuardTimeoutError } from 'node-elu-guard';",
   '',
   'export async function use(): Promise<CircuitState> {',
   '  const guard = new EluGuard({',
@@ -175,9 +175,9 @@ const CORE_TS_CONSUMER = [
 const ADAPTER_TS_CONSUMER = [
   "import express from 'express';",
   "import Fastify from 'fastify';",
-  "import { EluGuard, eluGuardExpress } from 'elu-guard/express';",
-  "import { eluGuardFastify } from 'elu-guard/fastify';",
-  "import { eluGuardHttp } from 'elu-guard/http';",
+  "import { EluGuard, eluGuardExpress } from 'node-elu-guard/express';",
+  "import { eluGuardFastify } from 'node-elu-guard/fastify';",
+  "import { eluGuardHttp } from 'node-elu-guard/http';",
   '',
   'const guard = new EluGuard();',
   '',

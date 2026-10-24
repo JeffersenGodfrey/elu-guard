@@ -52,8 +52,10 @@ const ALLOWED_PACK_PATHS = [
 
 function assertPackContents() {
   const output = run('npm', ['pack', '--dry-run', '--json'], { cwd: repoRoot });
-  const [info] = JSON.parse(output);
-  const paths = info.files.map((file) => file.path).sort();
+  const parsed = JSON.parse(output);
+  const normalized = Array.isArray(parsed) ? parsed : Object.values(parsed);
+  const info = normalized[0];
+  const paths = (info?.files || []).map((file) => file.path).sort();
 
   const unexpected = paths.filter(
     (path) => !ALLOWED_PACK_PATHS.some((rule) => (rule instanceof RegExp ? rule.test(path) : rule === path)),
@@ -276,7 +278,8 @@ function main() {
   try {
     log('packing and installing into a fresh consumer...');
     const packed = run('npm', ['pack', '--pack-destination', staging], { cwd: repoRoot }).trim();
-    const tarball = join(staging, packed.split(/\r?\n/).pop().trim());
+    const lines = packed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const tarball = join(staging, lines[lines.length - 1]);
 
     writeFileSync(
       join(workspace, 'package.json'),

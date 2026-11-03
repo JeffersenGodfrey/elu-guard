@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-11-03
+
+### Changed
+- Release pipeline switched to OIDC trusted publishing with sigstore provenance (`--provenance`). No functional changes to the package.
+- README: removed ASCII flow diagrams and mermaid chart.
+
 ## [1.0.0] - 2026-11-02
 
 Breaking change: the framework adapters move to opt-in sub-paths with zero

@@ -12,24 +12,6 @@ One guard protects one downstream dependency. It decides whether a call is admit
 
 ![Architecture](docs/architecture.png)
 
-```
-execute(fn, opts)
-      |
-      v
-circuit breaker --open--> fail fast (CircuitOpenError) or fallback
-      |
-admitted
-      v
-limiter.acquire() --no slot--> queue -> reject / timeout
-      |                         |
-      |  slot granted           +--> queued callers freed on deadline or caller abort
-      v
-deadline + AbortController --> ctx.signal handed to your task
-      |
-      v
-task result -> record success/failure to breaker + limiter -> release slot
-```
-
 ```ts
 import { createGuard } from 'node-elu-guard';
 
@@ -57,49 +39,7 @@ A Node service under load degrades in two different ways, and they need differen
 
 CPU% tells you what the machine is doing, not what your process is waiting on. Latency tells you a call was slow, but not whether that was your process or the dependency. `perf_hooks.eventLoopUtilization()` measures how much of the last window your event loop spent active versus idle—a direct signal of local saturation, unrelated to how slow any single downstream is. That is the signal the control loop reacts to.
 
-## How it works
-
-```
-execute(fn, opts)
-      |
-      v
-  circuit breaker --open--> fail fast (CircuitOpenError) or fallback
-      |
-   admitted
-      v
-   limiter.acquire() --no slot--> queue -> reject (ConcurrencyLimitError) / timeout
-      |                         |
-      |  slot granted           +--> queued callers are freed when a deadline or
-      v                              a caller abort fires while they wait
-  deadline + AbortController ---> ctx.signal handed to your task
-      |
-      v
-   await Promise.race([fn(ctx), fence])   <- a deadline is a fence, not a hint
-      |
-   settle: release permit + hand back any half-open probe exactly once
-      |
-   classify(result) -> breaker.recordSuccess() | breaker.recordFailure()
-```
-
 ## Architecture
-
-```mermaid
-flowchart LR
-   Caller[Caller or framework adapter] --> Guard[EluGuard.execute]
-   Guard --> Breaker[Circuit breaker]
-   Breaker -->|OPEN| Fallback[Fail fast or fallback]
-   Breaker -->|CLOSED or HALF_OPEN| Limiter[AIMD concurrency limiter]
-   Limiter -->|No slot| Queue[FIFO queue with timeout and abort]
-   Limiter -->|Admitted| Task[Downstream task]
-   Task --> Outcome{Outcome}
-   Outcome -->|Success| Recovery[Record success and release permit]
-   Outcome -->|Failure or timeout| Failure[Classify failure and release permit]
-   Failure --> Breaker
-   Failure --> Feedback[Failure, latency, or Retry-After feedback]
-   Feedback --> Limiter
-   ELU[Node event-loop utilization] --> Limiter
-   Recovery --> Breaker
-```
 
 Each guard owns its limiter and breaker. There is no global registry or shared
 health state, so a failing dependency cannot reduce capacity for unrelated
